@@ -12,23 +12,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: 语法检查（标准库即可）
+      - name: 脚本语法检查
         run: |
-          python - <<'EOF'
+          python - <<'PY'
           import pathlib
+          files = sorted(pathlib.Path("tools").glob("*.py"))
           bad = []
-          for p in sorted(pathlib.Path("tools").glob("*.py")):
+          for p in files:
               try:
                   compile(p.read_text(encoding="utf-8"), str(p), "exec")
               except SyntaxError as e:
                   bad.append(f"{p}: {e}")
-          print("\n".join(bad) if bad else f"ok: {len(list(pathlib.Path('tools').glob('*.py')))} files")
+          print("\n".join(bad) if bad else f"ok: {len(files)} files")
           raise SystemExit(1 if bad else 0)
-          EOF
+          PY
       - name: 样书结构校验
-        run: python - <<'EOF'
+        run: |
+          python - <<'PY'
           import json, pathlib
           book = json.loads(pathlib.Path("samples/demo-book/book.json").read_text(encoding="utf-8"))
-          assert book["blocks"] and book["stats"]["pages"] == book["pages"]
+          assert book["blocks"], "empty blocks"
+          assert book["stats"]["pages"] == book["pages"]
           print("demo ok:", book["title"], len(book["blocks"]), "blocks")
-          EOF
+          PY

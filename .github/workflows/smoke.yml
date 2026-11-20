@@ -1,0 +1,34 @@
+name: smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 语法检查（标准库即可）
+        run: |
+          python - <<'EOF'
+          import pathlib
+          bad = []
+          for p in sorted(pathlib.Path("tools").glob("*.py")):
+              try:
+                  compile(p.read_text(encoding="utf-8"), str(p), "exec")
+              except SyntaxError as e:
+                  bad.append(f"{p}: {e}")
+          print("\n".join(bad) if bad else f"ok: {len(list(pathlib.Path('tools').glob('*.py')))} files")
+          raise SystemExit(1 if bad else 0)
+          EOF
+      - name: 样书结构校验
+        run: python - <<'EOF'
+          import json, pathlib
+          book = json.loads(pathlib.Path("samples/demo-book/book.json").read_text(encoding="utf-8"))
+          assert book["blocks"] and book["stats"]["pages"] == book["pages"]
+          print("demo ok:", book["title"], len(book["blocks"]), "blocks")
+          EOF

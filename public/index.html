@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>筑学 · 书库</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="shelf-page">
+  <header class="shelf-head">
+    <div class="brand">
+      <span class="logo">筑</span>
+      <div>
+        <h1>筑学书库</h1>
+        <p>把建筑学的书，读成自己的体系</p>
+      </div>
+    </div>
+    <div class="head-actions">
+      <span id="count" class="count"></span>
+      <button id="refresh" class="btn">刷新</button>
+    </div>
+  </header>
+
+  <section class="shelf-filter">
+    <div class="filter-tabs" id="filterTabs">
+      <button class="tab is-active" data-cat="全部">全部<span class="tab-n" id="nAll">0</span></button>
+      <button class="tab" data-cat="教材">教材<span class="tab-n" id="nText">0</span></button>
+      <button class="tab" data-cat="扩展">扩展<span class="tab-n" id="nExt">0</span></button>
+    </div>
+    <select id="quickJump" class="quick-jump" aria-label="快速跳转"></select>
+  </section>
+
+  <main id="shelf" class="shelf"></main>
+
+  <footer class="shelf-foot">
+    <p>加书方法：把 PDF 放进 <code>待转换书籍</code> 文件夹 → 双击 <code>一键转换书籍.bat</code> → 回来点「刷新」</p>
+  </footer>
+
+  <script src="shelf.js"></script>
+</body>
+</html>

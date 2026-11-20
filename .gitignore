@@ -1,0 +1,35 @@
+# 书稿数据永不入库
+books/
+待转换书籍/
+需人工处理/
+题库/
+_dist/
+.venv/
+_book_backups/
+工作记录/
+**/assets/
+!samples/**/assets/
+!samples/**/assets/**
+**/pages/
+book.json
+!samples/**/book.json
+book_raw.json
+*.pdf
+*.webp
+*.jpg
+*.png
+!samples/**/*.webp
+!samples/**/*.png
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 本地
+.bookroot
+*.log
+
+# 样书生成的报告（可由 tools/proofread.py 重新生成）
+samples/**/校对清单.md
+samples/**/proofread.json

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>筑学 · 阅读</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="reader-page">
+  <header class="reader-head">
+    <a class="btn" href="index.html">← 书架</a>
+    <span class="title" id="bookTitle">加载中…</span>
+    <span class="sub" id="bookSub"></span>
+    <span class="spacer"></span>
+    <select id="chapterSelect" aria-label="跳转章节"></select>
+    <span class="pagejump">
+      <input id="pageInput" type="number" min="1" inputmode="numeric" placeholder="页码" aria-label="跳转页码" />
+      <button class="btn" id="jumpBtn">跳转</button>
+    </span>
+    <button class="btn" id="bmAddBtn" title="收藏当前页">书签</button>
+    <button class="btn" id="bmListBtn">书签夹</button>
+    <button class="btn" id="tocBtn">目录</button>
+    <button class="btn" id="modeBtn">双页</button>
+    <a class="btn hidden" id="qbBtn" href="#" title="进入这本书的题库">刷题</a>
+  </header>
+
+  <div class="reader-body">
+    <aside class="toc" id="toc">
+      <h3>目录</h3>
+      <div id="tocList"></div>
+    </aside>
+
+    <main class="reader-stage" id="stage">
+      <button class="nav prev" id="prevBtn" aria-label="上一页">‹</button>
+      <div class="frame" id="frame"><div id="bookBody"></div></div>
+      <button class="nav next" id="nextBtn" aria-label="下一页">›</button>
+    </main>
+
+    <aside class="bookmarks hidden" id="bookmarks">
+      <div class="bm-head">
+        <h3>书签夹</h3>
+        <button class="btn" id="bmClose">关闭</button>
+      </div>
+      <div class="bm-tip" id="bmTip">翻到想记住的页，点上方「书签」即可收藏；点书签可跳回该页。</div>
+      <div id="bmList"></div>
+    </aside>
+  </div>
+
+  <footer class="reader-foot">
+    <div class="counter" id="counter"></div>
+    <div class="bar"><i id="barFill"></i></div>
+  </footer>
+
+  <script src="reader.js"></script>
+</body>
+</html>

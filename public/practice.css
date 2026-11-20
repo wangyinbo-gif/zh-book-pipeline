@@ -1,0 +1,132 @@
+/* 筑学 · 刷题页样式（复用 style.css 的变量与 .btn） */
+.practice-page { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
+.practice-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 18px;
+  background: #f7f7f3; border-bottom: 1px solid var(--line); font-size: 13px;
+}
+.practice-head .qb-title { font-weight: 600; }
+.practice-head .spacer { flex: 1; }
+.practice-head .btn { padding: 5px 11px; font-size: 12px; }
+.practice-head select {
+  border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; font-size: 12px;
+  background: #fff; max-width: 200px; font-family: inherit;
+}
+.practice-head #wrongBtn b { color: var(--accent); }
+
+.practice-body { flex: 1; display: flex; min-height: 0; }
+.practice-stage {
+  flex: 1; min-width: 0; overflow: auto; padding: 22px 20px 40px;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.q-progress { width: min(820px, 100%); display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
+.q-bar { flex: 1; height: 5px; background: #e5e3db; border-radius: 99px; overflow: hidden; }
+.q-bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+.q-card {
+  width: min(820px, 100%); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 22px 26px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.05);
+}
+.q-head { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--muted); margin-bottom: 12px; }
+.q-type { background: #efece4; border-radius: 99px; padding: 3px 10px; color: var(--ink); font-weight: 600; }
+.q-diff { margin-left: auto; }
+.q-stem {
+  font-size: 19px; line-height: 1.85; font-family: "Songti SC", "Noto Serif SC", Georgia, serif;
+  margin-bottom: 16px; white-space: pre-wrap;
+}
+.q-options { display: flex; flex-direction: column; gap: 10px; }
+.q-option {
+  display: flex; align-items: flex-start; gap: 12px; text-align: left; width: 100%;
+  border: 1px solid var(--line); background: #fbfbf8; border-radius: 10px;
+  padding: 12px 14px; font-size: 15px; line-height: 1.6; cursor: pointer; font-family: inherit;
+  color: var(--ink); transition: border-color .12s, background .12s;
+}
+.q-option:hover { border-color: #c9c9c0; }
+.q-option .opt-key {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center;
+  border: 1px solid var(--line); font-size: 12px; background: #fff;
+}
+.q-option.is-selected { border-color: var(--accent); background: #fdf3f0; }
+.q-option.is-selected .opt-key { background: var(--accent); color: #fff; border-color: var(--accent); }
+.q-option.is-right { border-color: #2f7d4f; background: #eef7f1; }
+.q-option.is-right .opt-key { background: #2f7d4f; color: #fff; border-color: #2f7d4f; }
+.q-option.is-wrong { border-color: #b33f2a; background: #fdf0ed; }
+.q-option.is-wrong .opt-key { background: #b33f2a; color: #fff; border-color: #b33f2a; }
+
+.q-blanks { display: flex; flex-direction: column; gap: 10px; }
+.blank-row { display: flex; align-items: center; gap: 10px; }
+.blank-no { font-size: 12px; color: var(--muted); width: 54px; }
+.blank-input {
+  flex: 1; border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px;
+  font-size: 15px; font-family: inherit; background: #fbfbf8;
+}
+.blank-input:focus { outline: none; border-color: var(--accent); background: #fff; }
+.q-notes {
+  width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+  font-size: 14px; line-height: 1.7; font-family: inherit; background: #fbfbf8; resize: vertical;
+}
+.q-notes:focus { outline: none; border-color: var(--accent); background: #fff; }
+
+.q-feedback { margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 14px; font-size: 14px; line-height: 1.85; }
+.fb-line { font-weight: 700; margin-bottom: 8px; }
+.fb-line.ok { color: #2f7d4f; }
+.fb-line.bad { color: #b33f2a; }
+.fb-chosen { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+.fb-answer { margin-bottom: 8px; }
+.fb-explain { color: #4a4a44; font-size: 13.5px; background: #f8f7f2; border-radius: 8px; padding: 10px 12px; }
+.fb-grade { margin-top: 14px; display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
+.q-actions { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: #9e3523; border-color: #9e3523; }
+.btn:disabled { opacity: .45; cursor: default; }
+.q-actions a.btn { text-decoration: none; display: inline-block; }
+
+.q-nav {
+  width: min(820px, 100%); display: flex; align-items: center; justify-content: space-between;
+  font-size: 12px; color: var(--muted);
+}
+
+.wrong-panel {
+  flex: 0 0 340px; border-left: 1px solid var(--line); background: #faf9f4;
+  display: flex; flex-direction: column; min-height: 0;
+}
+.wp-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px; }
+.wp-head h3 { margin: 0; font-size: 14px; font-family: "Songti SC", serif; }
+.wp-tip { margin: 0 16px 10px; font-size: 11.5px; color: var(--muted); line-height: 1.6; }
+#wrongList { flex: 1; overflow: auto; padding: 0 10px 16px; }
+.wp-empty { padding: 30px 10px; text-align: center; color: var(--muted); font-size: 12px; }
+.wp-item {
+  display: flex; gap: 8px; align-items: flex-start; padding: 9px 10px; border-radius: 8px;
+  cursor: pointer; font-size: 12px; line-height: 1.5; border: 1px solid transparent;
+}
+.wp-item:hover { background: #fff; border-color: var(--line); }
+.wp-type { flex: 0 0 auto; color: var(--accent); font-size: 11px; }
+.wp-stem { flex: 1; color: var(--ink); }
+.wp-ch { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.hidden { display: none !important; }
+@media (max-width: 900px) {
+  .wrong-panel { position: fixed; right: 0; top: 0; bottom: 0; z-index: 30; box-shadow: var(--shadow); }
+  .q-card { padding: 18px 16px; }
+  .q-stem { font-size: 17px; }
+}
+
+/* ---------------- 平板 / 手机适配（2026-11-05） ---------------- */
+@media (max-width: 1100px) {
+  .practice-head { flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
+  .practice-head .qb-title { flex: 1 1 100%; font-size: 15px; }
+  .practice-head .spacer { display: none; }
+  .practice-head select { flex: 1 1 140px; max-width: none; }
+  .practice-head .btn { padding: 8px 12px; }
+  .practice-stage { padding: 14px 12px 32px; }
+}
+@media (max-width: 900px) {
+  .q-card { padding: 16px 14px; border-radius: 12px; }
+  .q-stem { font-size: 17px; line-height: 1.8; }
+  .q-option { font-size: 15.5px; padding: 13px 12px; }
+  .blank-input { font-size: 16px; padding: 11px 12px; }
+  .q-notes { font-size: 15px; }
+  .q-actions { flex-wrap: wrap; }
+  .q-actions .btn { min-height: 42px; }
+  .q-nav .btn { min-height: 40px; }
+  .wrong-panel { width: 100%; flex-basis: 100%; }
+}

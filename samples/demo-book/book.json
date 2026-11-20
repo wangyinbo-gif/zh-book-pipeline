@@ -1,0 +1,116 @@
+{
+ "bookId": "demo-book",
+ "title": "示例样书 · 结构说明",
+ "author": "zh-book-pipeline",
+ "pages": 3,
+ "chapters": [
+  {
+   "id": "ch1",
+   "title": "第1章 示例",
+   "startPage": 1,
+   "startBlock": "b1",
+   "endBlock": "b5"
+  },
+  {
+   "id": "ch2",
+   "title": "第2章 结构",
+   "startPage": 2,
+   "startBlock": "b6",
+   "endBlock": "b10"
+  }
+ ],
+ "blocks": [
+  {
+   "id": "b1",
+   "type": "heading",
+   "level": 1,
+   "text": "示例样书 · 结构说明",
+   "page": 1
+  },
+  {
+   "id": "b2",
+   "type": "paragraph",
+   "text": "这是一本自制的示例样书，用来演示 book.json 的数据结构与阅读器渲染。它不包含任何受版权保护的书籍内容。",
+   "page": 1
+  },
+  {
+   "id": "b3",
+   "type": "heading",
+   "level": 2,
+   "text": "1.1 图与图注",
+   "page": 1
+  },
+  {
+   "id": "b4",
+   "type": "paragraph",
+   "text": "下图是仓库自带的自制示意图。图注照录原页印刷文字，不拟题，这是本项目的硬规矩之一。",
+   "page": 1
+  },
+  {
+   "id": "b5",
+   "type": "figure",
+   "page": 1,
+   "asset": "assets/demo-fig-1.webp",
+   "width": 640,
+   "height": 400,
+   "caption": "图1-1 流水线三段：识别、结构化、质检（示例）",
+   "captionDisplay": true
+  },
+  {
+   "id": "b6",
+   "type": "paragraph",
+   "text": "样书只有 3 页，但字段与真实书稿一致：heading / paragraph / figure / table / note / caption 六种块类型，页号、章节、统计信息齐全。",
+   "page": 2
+  },
+  {
+   "id": "b7",
+   "type": "heading",
+   "level": 2,
+   "text": "1.2 表格",
+   "page": 2
+  },
+  {
+   "id": "b8",
+   "type": "table",
+   "page": 2,
+   "rows": [
+    [
+     "阶段",
+     "输入",
+     "输出"
+    ],
+    [
+     "convert",
+     "PDF",
+     "book.json + assets"
+    ],
+    [
+     "proofread",
+     "book.json",
+     "校对清单.md"
+    ]
+   ],
+   "caption": "表1-1 流水线阶段示例"
+  },
+  {
+   "id": "b9",
+   "type": "note",
+   "text": "（示例注：脚注会以 note 块紧跟所在段落之后。）",
+   "page": 2
+  },
+  {
+   "id": "b10",
+   "type": "paragraph",
+   "text": "第 3 页演示章节收尾与统计。stats 里的数字由工具重算，不手写。",
+   "page": 3
+  }
+ ],
+ "stats": {
+  "pages": 3,
+  "chars": 276,
+  "paragraphs": 4,
+  "figures": 1,
+  "tables": 1,
+  "captions": 1
+ }
+}

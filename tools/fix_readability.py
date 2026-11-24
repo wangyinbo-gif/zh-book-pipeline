@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 """筑学 · 阅读体验修补（第二轮）
 
-1. 去掉最后一页（出版社广告/分类表）；
-2. 去掉误检成插图的「篇扉页扫描图」（无图注、宽度接近整页）；
-3. 给个别真插图补图注；
-4. 清理 OCR 重复标点（。，。. 之类）；
-5. 把「逗号后断段」「续段」并回上一段（只做确定性高的规则）；
-6. 重建章节/统计/预览。
+1. 仅在传入已核实的广告页码时移出该页；
+2. 登记可能误切的宽大无注图；
+3. 清理 OCR 重复标点（。，。. 之类）；
+4. 把「逗号后断段」「续段」并回上一段（只做确定性高的规则）；
+5. 重建章节/统计/预览。
 """
 import json
 import os
 import re
 import sys
 import glob
+import argparse
+
+from figure_cleanup_log import record_removal
 
 TERM = "。！？…：；”』」)"
 CN = re.compile(r"[\u4e00-\u9fa5]")
@@ -28,40 +30,10 @@ def width_of(book_dir, src):
         return 0
 
 
-def drop_ad_page(blocks):
-    return [b for b in blocks if b.get("page") != 414]
-
-
-def drop_bad_figures(blocks, book_dir):
-    """删掉误检的篇扉页扫描图（无图注且宽度≥整页宽度的 90%），并删资源文件。"""
-    removed = []
-    keep = []
-    for b in blocks:
-        if b["type"] == "figure" and not b.get("caption"):
-            w = width_of(book_dir, b.get("src") or "")
-            if w >= 380:
-                removed.append(b)
-                p = os.path.join(book_dir, (b.get("src") or "").replace("/", os.sep))
-                if os.path.isfile(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
-                continue
-        keep.append(b)
-    return keep, removed
-
-
-def fix_captions(blocks):
-    fixed = 0
-    for b in blocks:
-        if b["type"] != "figure":
-            continue
-        if b.get("id") == "fig-220" and not b.get("caption"):
-            b["caption"] = "图9-16 恩瓦立德教堂平面"
-            b["displayCaption"] = (b.get("displayCaption") or "图212") + " 恩瓦立德教堂平面"
-            fixed += 1
-    return fixed
+def wide_unlabeled_figures(blocks, book_dir):
+    """找可能误切的宽大无注图，宽度本身不足以判断是否为插图。"""
+    return [b for b in blocks if b["type"] == "figure" and not b.get("caption")
+            and width_of(book_dir, b.get("src") or "") >= 380]
 
 
 PUNCT_FIX = [
@@ -361,15 +333,20 @@ def rebuild(book, blocks):
 
 
 def main():
-    book_dir = sys.argv[1]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("book_dir")
+    parser.add_argument("--ad-page", type=int, action="append", default=[],
+                        help="已人工确认的 PDF 广告页，可重复指定")
+    args = parser.parse_args()
+    book_dir = args.book_dir
     path = os.path.join(book_dir, "book.json")
     with open(path, encoding="utf-8") as f:
         book = json.load(f)
     blocks = book["blocks"]
 
-    blocks = drop_ad_page(blocks)
-    blocks, removed = drop_bad_figures(blocks, book_dir)
-    capn = fix_captions(blocks)
+    ads = [block for block in blocks if block.get("page") in args.ad_page]
+    blocks = [block for block in blocks if block.get("page") not in args.ad_page]
+    wide_candidates = wide_unlabeled_figures(blocks, book_dir)
     pn = clean_punct(blocks)
     blocks, mn = merge_runs(blocks)
     blocks, cap_moved, cross_merged = merge_across_figures(blocks)
@@ -378,6 +355,9 @@ def main():
     blocks, all_merged = merge_all_midsentence(blocks)
     rebuild(book, blocks)
 
+    if wide_candidates or ads:
+        record_removal(book_dir, "fix_readability", [b for b in ads if b["type"] == "figure"],
+                       {"ad_page_blocks": ads, "wide_unlabeled_candidates": wide_candidates})
     with open(path, "w", encoding="utf-8") as f:
         json.dump(book, f, ensure_ascii=False, indent=2)
     try:
@@ -386,7 +366,7 @@ def main():
         build_preview(book, os.path.join(book_dir, "preview.html"))
     except Exception as e:
         print("预览重建失败:", e)
-    print("删除广告页块 + 误检图:", len(removed), "| 补图注:", capn, "| 修标点:", pn, "| 合并续段:", mn)
+    print("移出广告页块:", len(ads), "| 疑似宽大无注图:", len(wide_candidates), "| 修标点:", pn, "| 合并续段:", mn)
     print("跨图注行并入图注:", cap_moved, "| 跨图续段合并:", cross_merged,
           "| 句中接段:", mid_merged, "| 升级小标题:", mid_headed,
           "| 标注并入图注:", label_moved, "| 全量接段:", all_merged)

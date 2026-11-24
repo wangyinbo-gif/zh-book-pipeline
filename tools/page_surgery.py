@@ -74,7 +74,17 @@ def main():
             raise SystemExit("书稿已变化，计划失效；请重新核对并重新生成计划")
     with open(fp, encoding="utf-8-sig") as source:
         book = json.load(source)
+    amend(book, fix)
+    if not fix.get("apply"):
+        print("（未写盘：fixfile 无 apply:true）")
+        return 0
+    return write_book(d, fp, book, expected)
+
+
+def amend(book, fix):
+    """Apply the plan in memory, returning the new indices of retained blocks."""
     blocks = book["blocks"]
+    original = list(blocks)
     before = bag(blocks)
 
     # 1) 先解析全部锚点（任何替换之前）
@@ -131,19 +141,21 @@ def main():
           "".join(k * v for k, v in sorted(added.items()))[:120])
     if removed:
         print("!! 有删除：请逐字确认只是去重/错字替换，不是丢正文")
-    if not fix.get("apply"):
-        print("（未写盘：fixfile 无 apply:true）")
-        return 0
-
     def count_chars(bks):
         return sum(len(block_text(b)) for b in bks
                    if b.get("type") in ("paragraph", "heading", "table"))
 
-    book["stats"]["chars"] = count_chars(blocks)
-    book["stats"]["paragraphs"] = sum(1 for b in blocks if b["type"] == "paragraph")
+    stats = book.setdefault("stats", {})
+    stats["chars"] = count_chars(blocks)
+    stats["paragraphs"] = sum(1 for b in blocks if b["type"] == "paragraph")
     figs = [b for b in blocks if b["type"] == "figure"]
-    book["stats"]["figures"] = len(figs)
-    book["stats"]["paired"] = sum(1 for b in figs if (b.get("caption") or "").strip())
+    stats["figures"] = len(figs)
+    stats["paired"] = sum(1 for b in figs if (b.get("caption") or "").strip())
+    retained = {id(block): idx for idx, block in enumerate(blocks)}
+    return {idx: retained[id(block)] for idx, block in enumerate(original) if id(block) in retained}
+
+
+def write_book(d, fp, book, expected):
     if expected:
         with open(fp, "rb") as source:
             if hashlib.sha256(source.read()).hexdigest() != expected:
@@ -163,7 +175,7 @@ def main():
         json.dump(book, f, ensure_ascii=False)
     os.replace(tmp, fp)
     print("已写回；备份", os.path.basename(bak),
-          "| blocks", len(blocks), "chars", book["stats"]["chars"],
+          "| blocks", len(book["blocks"]), "chars", book["stats"]["chars"],
           "图", book["stats"]["figures"], "配注", book["stats"]["paired"])
     print("下一步：python tools\\realign_chapters.py \"%s\" && python tools\\pipeline.py recheck \"%s\""
           % (d, os.path.basename(d)))

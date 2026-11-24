@@ -17,6 +17,7 @@ python tools/pipeline.py structure "<书名>"    # 章起点是否落在标题�
 python tools/proofread.py "books/<书名>"       # 校对清单（必看/参考）
 python tools/realign_chapters.py "books/<书名>"  # 章边界重对齐，回退数应为 0
 python tools/booklist.py                       # 全库数字汇总（页/字/章/图/配注）
+python -m unittest discover -s tools           # 诊断/复核工具回归（临时目录，不写书库）
 ```
 
 常见不变量：

@@ -13,14 +13,20 @@ Each item names an existing page_surgery plan and supplies one review per region
 Paths in the manifest are resolved relative to the manifest. The generated
 plan is dry-run by default. --ready only generates apply:true when each region
 has a recorded manual verification, existing evidence, an explanation for any
-net removed Chinese characters, and all figure assets exist. This tool never
-applies a plan and cannot determine whether a human actually reviewed it.
+net removed Chinese characters, and all figure assets exist.
+Use --execute with the resulting reviewed plan to snapshot, apply and verify it.
 """
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
-from page_surgery import bag, block_text
+import subprocess
+import sys
+from tempfile import NamedTemporaryFile
+
+from page_surgery import amend, bag, block_text
+from realign_chapters import check_bounds, realign_book
 
 
 def resolve(base, value):
@@ -136,13 +142,179 @@ def compile_batch(manifest_file, ready=False):
     return merged, report
 
 
+def update_anchors(bank, old_blocks, book, retained, overrides):
+    """Move unchanged anchors mechanically. Require an explicit index for edited anchors."""
+    new_blocks = book["blocks"]
+    chapter_ranges = {c.get("id"): (c["startBlock"], c["endBlock"] + 1) for c in book.get("chapters", [])}
+    changes = []
+    unresolved = []
+    for item in bank["questions"]:
+        qid = item["id"]
+        old = item.get("block")
+        if type(old) is not int or not 0 <= old < len(old_blocks) or item.get("page") != old_blocks[old].get("page"):
+            raise ValueError(f"题库与改前书稿的坐标不一致：{qid}")
+        new = overrides.get(qid, retained.get(old))
+        if new is None:
+            matches = [i for i, block in enumerate(new_blocks) if block == old_blocks[old]]
+            if len(matches) == 1:
+                new = matches[0]
+        if new is None:
+            unresolved.append({"id": qid, "old_block": old, "page": item["page"],
+                               "old_text": block_text(old_blocks[old])})
+            continue
+        if type(new) is not int or not 0 <= new < len(new_blocks):
+            raise ValueError(f"新题库锚点越界：{qid}")
+        block = new_blocks[new]
+        low, high = chapter_ranges.get(item.get("chapter"), (0, len(new_blocks)))
+        if not low <= new < high or block.get("type") == "figure" or not block_text(block).strip():
+            raise ValueError(f"新题库锚点类型或章节异常：{qid}")
+        if new != old or block.get("page") != item["page"]:
+            changes.append({"id": qid, "old": old, "new": new, "page": block.get("page")})
+        item["block"], item["page"] = new, block.get("page")
+    return changes, unresolved
+
+
+def write_atomic(path, contents):
+    with NamedTemporaryFile(dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write(contents)
+            stream.close()
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
+def json_bytes(data):
+    return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+def execute_batch(plan_path, output, bank_path=None, overrides_path=None):
+    """Apply an approved plan once, retaining paired snapshots and verification logs."""
+    import qbank
+
+    plan_path = Path(plan_path).resolve()
+    fix = json.loads(plan_path.read_text(encoding="utf-8-sig"))
+    if fix.get("apply") is not True or not fix.get("expected_book_sha256"):
+        raise ValueError("需要带书稿 SHA-256 的已核应用计划")
+    book_dir = resolve(plan_path.parent, fix["book_dir"])
+    manuscript = book_dir / "book.json"
+    discovered = qbank.find_bank(book_dir.name) if book_dir.parent == Path(qbank.BOOKS).resolve() else None
+    bank_file = Path(bank_path or discovered).resolve() if bank_path or discovered else None
+    if bank_file == manuscript:
+        raise ValueError("题库和书稿必须是不同文件")
+    overrides = json.loads(Path(overrides_path).read_text(encoding="utf-8-sig")) if overrides_path else {}
+    output = Path(output).resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    record = output / "batch-status.json"
+    state = {"status": "preparing", "book": str(manuscript), "bank": str(bank_file) if bank_file else None}
+    write_atomic(record, json_bytes(state))
+    lock = book_dir / ".review-batch.lock"
+    try:
+        with lock.open("x", encoding="utf-8") as stream:
+            stream.write(str(record))
+    except FileExistsError as exc:
+        raise ValueError(f"已有批次在执行或待恢复：{lock}") from exc
+    try:
+        before = manuscript.read_bytes()
+        if hashlib.sha256(before).hexdigest() != fix["expected_book_sha256"]:
+            raise ValueError("书稿已变化或计划已应用，请重新试算")
+        book = json.loads(before.decode("utf-8-sig"))
+        old_blocks = list(book["blocks"])
+        (output / "book-before.json").write_bytes(before)
+        bank_before = bank_file.read_bytes() if bank_file else None
+        if bank_file:
+            (output / "bank-before.json").write_bytes(bank_before)
+        retained = amend(book, fix)
+        unchanged = set(retained.values())
+        for index, block in enumerate(book["blocks"]):
+            if index in unchanged or block.get("type") != "figure":
+                continue
+            src = block.get("src")
+            asset = (book_dir / src).resolve() if src else None
+            if not asset or not asset.is_relative_to(book_dir) or not asset.is_file():
+                raise ValueError(f"拟写入图块的资产缺失或路径无效：{src or block.get('id')}")
+        state["chapter_fallbacks"] = realign_book(book)
+        check_bounds(book)
+        (output / "book-proposed.json").write_bytes(json_bytes(book))
+        if bank_file:
+            bank = json.loads(bank_before.decode("utf-8-sig"))
+            unknown = overrides.keys() - {item["id"] for item in bank["questions"]}
+            if unknown:
+                raise ValueError("找不到人工锚点对应的题目：" + ", ".join(sorted(unknown)))
+            changes, unresolved = update_anchors(bank, old_blocks, book, retained, overrides)
+            (output / "anchor-review.json").write_bytes(json_bytes({"changes": changes, "unresolved": unresolved}))
+            if unresolved:
+                state["status"] = "anchors_require_review"
+                raise ValueError("有 %d 道题需核对新锚点，详见 %s" % (len(unresolved), output / "anchor-review.json"))
+            (output / "bank-proposed.json").write_bytes(json_bytes(bank))
+        elif overrides:
+            raise ValueError("指定人工锚点时需要题库")
+
+        if manuscript.read_bytes() != before or (bank_file and bank_file.read_bytes() != bank_before):
+            raise ValueError("书稿或题库在批次准备期间发生变化，请重新试算")
+        state["status"] = "publishing"
+        write_atomic(record, json_bytes(state))
+        write_atomic(manuscript, (output / "book-proposed.json").read_bytes())
+        try:
+            if bank_file:
+                write_atomic(bank_file, (output / "bank-proposed.json").read_bytes())
+        except Exception:
+            write_atomic(manuscript, before)
+            state["status"] = "rolled_back"
+            raise
+        state["status"] = "published"
+        write_atomic(record, json_bytes(state))
+        verify_batch(book_dir, bank_file, discovered, output)
+        state["status"] = "checks_run"
+        write_atomic(record, json_bytes(state))
+    except Exception as exc:
+        state["error"] = str(exc)
+        write_atomic(record, json_bytes(state))
+        raise
+    finally:
+        if state["status"] != "publishing":
+            lock.unlink()
+    return record
+
+
+def verify_batch(book_dir, bank_file, discovered, output):
+    scripts = Path(__file__).resolve().parent
+    commands = [("pipeline.py", "recheck", str(book_dir)), ("proofread.py", str(book_dir)),
+                ("pipeline.py", "coverage", str(book_dir))]
+    if discovered and Path(discovered).resolve() == bank_file:
+        commands.extend(("qbank.py", action, book_dir.name) for action in ("check", "audit", "support"))
+    logs = output / "verification.log"
+    with logs.open("w", encoding="utf-8") as log:
+        for script, *args in commands:
+            log.write(f"\n--- {script} {' '.join(args)} ---\n")
+            log.flush()
+            result = subprocess.run([sys.executable, "-X", "utf8", str(scripts / script), *args],
+                                    stdout=log, stderr=subprocess.STDOUT, check=False)
+            if result.returncode:
+                raise ValueError(f"批次已写入，{script} 退出码 {result.returncode}，验收需要复核：{logs}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifest")
     parser.add_argument("--out", required=True)
     parser.add_argument("--ready", action="store_true")
     parser.add_argument("--dry-plan", help="--ready 时指定已生成并试算过的批量试算计划")
+    parser.add_argument("--execute", action="store_true", help="执行已核计划、保留成对快照并跑验收")
+    parser.add_argument("--bank", help="执行时指定非默认目录中的题库 JSON")
+    parser.add_argument("--anchors", help="执行时提供经人工核对的题号 → 新块下标 JSON")
     args = parser.parse_args()
+    if args.execute:
+        if args.ready or args.dry_plan:
+            parser.error("--execute 使用已核计划，请勿与 --ready / --dry-plan 同时使用")
+        try:
+            print("批次及验收记录:", execute_batch(args.manifest, args.out, args.bank, args.anchors))
+        except (ValueError, OSError) as exc:
+            raise SystemExit(str(exc)) from exc
+        return
+    if args.bank or args.anchors:
+        parser.error("--bank 和 --anchors 需要 --execute")
     merged, report = compile_batch(args.manifest, ready=args.ready)
     if args.ready:
         if not args.dry_plan:

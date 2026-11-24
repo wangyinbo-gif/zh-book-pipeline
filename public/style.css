@@ -1,4 +1,4 @@
-/* 筑学 · 书库与阅读器样式 */
+﻿/* 筑学 · 书库与阅读器样式 */
 :root {
   --bg: #eeeee9;
   --panel: #ffffff;
@@ -301,3 +301,48 @@ html { -webkit-text-size-adjust: 100%; }
 /* 表格续排：新页重复表头，避免裁切 */
 .table-block table{break-inside:auto;}
 .table-block th,.table-block td{break-inside:avoid;}
+
+/* ---------------- 题库出处红线标记 ---------------- */
+.q-source-hit {
+  border-left: 3px solid #c0392b;
+  background: rgba(192, 57, 43, 0.08);
+  padding-left: 8px;
+  margin-left: -11px;
+}
+.q-source-banner {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid #c0392b;
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: #fff;
+  color: #a93226;
+  font-size: 14px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+}
+.q-source-close {
+  border: 0;
+  background: transparent;
+  color: #a93226;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+.q-source-close:hover { color: #7b241c; }
+
+/* 题库出处核验：横幅档位配色 */
+.q-source-banner { flex-wrap: wrap; row-gap: 2px; }
+.q-source-banner.is-green { border-color: #1e8449; color: #1e6b3a; }
+.q-source-banner.is-green .q-source-close { color: #1e6b3a; }
+.q-source-banner.is-amber { border-color: #b9770e; color: #935f0b; }
+.q-source-banner.is-amber .q-source-close { color: #935f0b; }
+.q-source-hint { font-size: 12px; color: #a93226; background: rgba(192, 57, 43, 0.08); border-radius: 99px; padding: 1px 8px; }
+.q-source-banner.is-red .q-source-close { color: #a93226; }

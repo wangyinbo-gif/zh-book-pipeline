@@ -21,7 +21,6 @@
 
 每个阶段在书目录写 .pipeline.json 记录进度；改参数（--scale）会重跑 convert 之后的阶段。
 """
-from paths import ROOT, BOOKS, TOOLS
 import argparse
 import concurrent.futures
 import difflib
@@ -298,6 +297,27 @@ def block_text(b):
     return b.get("text") or b.get("caption") or ""
 
 
+def load_ocr_pages(book_dir):
+    """Load OCR by source page, preferring usable ocr2 over legacy ocr."""
+    directory = os.path.join(book_dir, "pages")
+    result = {}
+    if not os.path.isdir(directory):
+        return result
+    for name in sorted(os.listdir(directory)):
+        match = re.fullmatch(r"page_(\d+)_(ocr2?)\.json", name)
+        if not match:
+            continue
+        page = int(match[1])
+        variant = match[2]
+        if page in result and result[page][0] == "ocr2":
+            continue
+        lines = read_json(os.path.join(directory, name))
+        if isinstance(lines, list):
+            result[page] = (variant, [line if isinstance(line, dict) else {"text": str(line)}
+                                      for line in lines if line is not None])
+    return dict(sorted(result.items()))
+
+
 def count_chars(book):
     return sum(len(block_text(b)) for b in (book.get("blocks") or [])
                if b.get("type") in ("paragraph", "heading", "table"))
@@ -344,15 +364,16 @@ def textcheck(book_dir):
       1. frag       碎片块：以标点开头的块（旁注被拆碎后顺序错乱的症状）
       2. tiny       极短块：<=12 字且非编号开头（参考；多数是图内标注）
       3. longnote   长句旁注：note 却 >=25 字且有句末标点（参考；旁注本身可长）
-      4. lost_lines OCR 行丢失：某行 4 字片在（本页±1）书稿汉字里覆盖率 <50%（组装丢内容）
+      4. 逐原页检查 OCR 行，分别报告疑缺、文本在异页、源页无书稿块和 OCR 缓存缺失。
       （注：块级 4 字片比对因旁注/正文交错噪声过大，已移除；错字靠 check/audit 的引文核对发现）
     """
     book = read_json(os.path.join(book_dir, "book.json"), {}) or {}
     blocks = book.get("blocks") or []
-    pages_dir = os.path.join(book_dir, "pages")
     PUNCT_HEAD = "，。；、：）」』】！？,.;:)]}％%"
     HAN = re.compile(r"[\u4e00-\u9fff]")
-    out = {"frag": [], "tiny": [], "longnote": [], "lost_lines": [], "_ocr_lines": 0}
+    out = {"frag": [], "tiny": [], "longnote": [], "lost_lines": [], "_ocr_lines": 0,
+           "other_page_lines": [], "missing_cache_pages": [], "no_block_pages": [],
+           "legacy_cache_pages": []}
 
     def han_only(s):
         return "".join(HAN.findall(s or ""))
@@ -389,54 +410,63 @@ def textcheck(book_dir):
         if len(re.sub(r"\s", "", t)) >= 25 and re.search(r"[。！？]\s*$", t):
             out["longnote"].append((i, b.get("page"), t[:40]))
 
-    if not os.path.isdir(pages_dir):
-        return out
-
-    # 读全部 OCR 行
-    pages = sorted(set(b.get("page") for b in blocks if b.get("page")))
-    ocr_by_page = {}
-    for p in pages:
-        fp = os.path.join(pages_dir, "page_%03d_ocr2.json" % p)
-        if not os.path.exists(fp):
-            continue
-        lines = [(l.get("text") or "").strip() for l in (read_json(fp, []) or [])]
-        lines = [x for x in lines if x]
-        if lines:
-            ocr_by_page[p] = lines
+    cache = load_ocr_pages(book_dir)
+    ocr_by_page = {p: [str(line["text"]).strip() for line in lines if line.get("text")]
+                   for p, (_, lines) in cache.items()}
+    book_pages = {b["page"] for b in blocks if type(b.get("page")) is int}
+    count = (book.get("stats") or {}).get("pages")
+    expected = set(range(1, count + 1)) if type(count) is int else set()
+    out["missing_cache_pages"] = sorted((expected | book_pages) - cache.keys())
+    out["no_block_pages"] = sorted(cache.keys() - book_pages)
+    out["legacy_cache_pages"] = [p for p, (variant, _) in cache.items() if variant == "ocr"]
     out["_ocr_lines"] = sum(len(v) for v in ocr_by_page.values())
     if not ocr_by_page:
         return out
 
-    # 每页书稿汉字（含 ±1 页邻页；图注也算，OCR 行包含图注文字）
-    def han_at(pg):
-        # 注意：figure 块也要算——图注/图例文字常常就是 OCR 行本身，不算会把它们误报成「丢行」
-        return han_only("".join(block_text(b) or "" for b in blocks
-                                if b.get("page") in (pg - 3, pg - 2, pg - 1, pg, pg + 1, pg + 2, pg + 3)
-                                and b.get("type") in ("paragraph", "note", "caption", "heading", "figure", "table")))
-
-    HEAD_PAT = re.compile(r"^(公共建筑设计原理|第\s?\d+\s?章)")
-
-    # 4) OCR 行丢失：先 ±3 页窗口，失败再全书二次确认（排除版权页/广告页）
-    book_all_han = han_only("".join(block_text(b) or "" for b in blocks
-                                    if b.get("type") in ("paragraph", "note", "caption", "heading", "figure", "table")))
-    FRONT_PAT = re.compile(r"^(上架建议|ISBN|图书在版编目|责任编辑|版权所有|定价|出版发行|全国百佳|如有印装)")
-    for p, lines in ocr_by_page.items():
-        hay = han_at(p)
-        if len(hay) < 40:
+    text_by_page = {}
+    all_text = []
+    for block in blocks:
+        text = han_only(block_text(block))
+        if not text:
             continue
+        all_text.append(text)
+        pages = block.get("pages")
+        pages = {page for page in pages if type(page) is int} if isinstance(pages, list) else set()
+        pages.add(block.get("page"))
+        for page in pages:
+            if type(page) is int:
+                text_by_page.setdefault(page, []).append(text)
+    text_by_page = {page: "".join(texts) for page, texts in text_by_page.items()}
+
+    head_pat = re.compile(r"^(公共建筑设计原理|第\s?\d+\s?章)")
+
+    all_text = "".join(all_text)
+    all_chunks = None
+    front_pat = re.compile(r"^(上架建议|ISBN|图书在版编目|责任编辑|版权所有|定价|出版发行|全国百佳|如有印装)")
+    for p, lines in ocr_by_page.items():
+        current = text_by_page.get(p, "")
+        nearby = {page: text_by_page.get(page, "") for page in range(p - 3, p + 4) if page != p}
         for ln in lines:
-            if HEAD_PAT.match(ln) or FRONT_PAT.match(ln) or re.match(r"^图\s*\d", ln):
+            if head_pat.match(ln) or front_pat.match(ln) or re.match(r"^图\s*\d", ln):
                 continue
             if has_watermark(ln):  # 扫描版夹带的广告贴纸文字，不算书稿内容
                 continue
             h = han_only(ln)
             if len(h) < 10:
                 continue
-            if cover(chunks4(h), hay) >= 0.5:
+            chunks = chunks4(h)
+            if cover(chunks, current) >= 0.5:
                 continue
-            # 全书二次确认：4 字片在全书书稿里也找不到才算真丢失
-            if cover(chunks4(h), book_all_han) < 0.5:
+            matched_pages = [page for page, text in nearby.items() if cover(chunks, text) >= 0.8]
+            if matched_pages:
+                out["other_page_lines"].append((p, ln[:46], matched_pages))
+                continue
+            if all_chunks is None:
+                all_chunks = set(chunks4(all_text)) if len(all_text) >= 4 else set()
+            if cover(chunks, all_chunks) < 0.5:
                 out["lost_lines"].append((p, ln[:46]))
+            else:
+                out["other_page_lines"].append((p, ln[:46], []))
 
     return out
 
@@ -471,24 +501,9 @@ def page_coverage(book_dir, min_ocr_han=60, low_ratio=0.60, win_ratio=0.80,
     def hz(s):
         return len(han.findall(s or ""))
 
-    ocr = {}
-    for fn in sorted(os.listdir(pages_dir)):
-        m = re.match(r"page_(\d+)_ocr2?\.json$", fn)
-        if not m:
-            continue
-        pg = int(m.group(1))
-        variant = 2 if fn.endswith("_ocr2.json") else 1
-        try:
-            lines = read_json(os.path.join(pages_dir, fn), []) or []
-        except Exception:
-            continue
-        texts = [(x.get("text") if isinstance(x, dict) else str(x)) or "" for x in lines]
-        n = sum(hz(t) for t in texts)
-        prev = ocr.get(pg)
-        if prev is None or variant > prev[0]:
-            ocr[pg] = (variant, n, " ".join(texts))
-    ocr_text = {pg: v[2] for pg, v in ocr.items()}
-    ocr = {pg: v[1] for pg, v in ocr.items()}
+    ocr_text = {p: " ".join(str(line.get("text") or "") for line in lines)
+                for p, (_, lines) in load_ocr_pages(book_dir).items()}
+    ocr = {p: hz(text) for p, text in ocr_text.items()}
     cand = sorted(pg for pg, n in ocr.items() if n >= min_ocr_han)
     if not cand:
         res["note"] = "OCR 行太少（无可用页码）"
@@ -694,6 +709,10 @@ def build_recheck(book_dir):
         "textcheck": {"frag": len(tc["frag"]), "tiny": len(tc["tiny"]),
                       "longnote": len(tc["longnote"]), "lost_lines": lost,
                       "ocrLines": ocr_lines,
+                      "otherPageLines": len(tc["other_page_lines"]),
+                      "missingCachePages": tc["missing_cache_pages"],
+                      "noBlockPages": tc["no_block_pages"],
+                      "legacyCachePages": tc["legacy_cache_pages"],
                       "lostRate": round(lost / float(ocr_lines), 4) if ocr_lines else 0.0,
                       "samples": [{"page": p, "text": t} for p, t in tc["lost_lines"][:8]]},
         "coverage": {k: cov.get(k) for k in ("pages", "offset", "median",
@@ -717,6 +736,8 @@ def render_recheck(data):
     lines.append("")
     lines.append("- 文字层 textcheck：碎片块 %d · 极短块 %d · 长句旁注 %d · **OCR 行丢失 %d**（丢行率 %.2f%%）"
                  % (tc["frag"], tc["tiny"], tc["longnote"], tc["lost_lines"], tc["lostRate"] * 100))
+    lines.append("- 原页诊断（候选）：缺 OCR 缓存 %d 页 · 有缓存但无书稿块 %d 页 · 异页文字线索 %d 行"
+                 % (len(tc.get("missingCachePages", [])), len(tc.get("noBlockPages", [])), tc.get("otherPageLines", 0)))
     if cov.get("pages"):
         lines.append("- 逐页覆盖率：OCR 页 %d · 页码偏移 %+d · 中位 %.2f · 必看 %d 页 / 参考 %d 页"
                      % (cov["pages"], cov["offset"], cov["median"],
@@ -1319,6 +1340,9 @@ def cmd_textcheck(args):
             r = textcheck(bd)
             rows.append((d, r))
         rows.sort(key=lambda x: -(len(x[1]["lost_lines"]) / max(1, x[1].get("_ocr_lines", 1)) + len(x[1]["frag"]) * 0.01))
+        if getattr(args, "json", False):
+            print(json.dumps(dict(rows), ensure_ascii=False, indent=2))
+            return 0
         print("%-38s %5s %7s %7s %7s %6s" % ("书", "碎片", "OCR丢", "丢行率", "极短", "长旁"))
         for d, r in rows:
             tot = max(1, r.get("_ocr_lines", 0))
@@ -1332,11 +1356,17 @@ def cmd_textcheck(args):
     if not d:
         raise SystemExit("用法：python tools/pipeline.py textcheck <书名或目录>  或  --all")
     r = textcheck(d)
+    if getattr(args, "json", False):
+        print(json.dumps(r, ensure_ascii=False, indent=2))
+        return 0
     print("# " + os.path.basename(d))
     print("  碎片块(标点开头)   %d" % len(r["frag"]))
     print("  极短块(<=12字)     %d" % len(r["tiny"]))
     print("  长句旁注           %d" % len(r["longnote"]))
     print("  OCR 行丢失         %d" % len(r["lost_lines"]))
+    print("  缺缓存 %d 页 · 无书稿块 %d 页 · 异页文字线索 %d 行 · 旧缓存 %d 页"
+          % (len(r["missing_cache_pages"]), len(r["no_block_pages"]),
+             len(r["other_page_lines"]), len(r["legacy_cache_pages"])))
     
     for k, title in (("frag", "碎片块"), ("lost_lines", "OCR行丢失"),
                      ("tiny", "极短块"), ("longnote", "长句旁注")):
@@ -1382,6 +1412,7 @@ def main():
     tc = sub.add_parser("textcheck", help="文字层体检：碎片块/极短块/长句旁注/OCR行丢失/字级多出（不计入门槛）")
     tc.add_argument("bookdir", nargs="?", default="")
     tc.add_argument("--all", action="store_true", help="扫描全库")
+    tc.add_argument("--json", action="store_true", help="输出完整候选 JSON")
     tc.set_defaults(func=cmd_textcheck)
 
     cov = sub.add_parser("coverage", help="逐页覆盖率体检：找整页/半页正文丢失（不计入门槛）")

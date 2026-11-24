@@ -15,7 +15,7 @@
 - 按原书目录重建 **章 / 节 / 页码映射**，并给出章首末块，支持跨页续段（`pages` 字段）
 - 每本书写出 `book.json`（单一事实源）与 `stats`（页/字/章/图/配注数，工具重算，不手写）
 
-实盘规模（2026-11-20 现算）：**44 本 / 17,513 页 / 12,540,226 字 / 615 章 / 14,797 图（配注 13,627）**，全部通过程序门禁；题库 9 套 / 5,594 题（`qbank.py check` 0 错 0 警）。
+实盘规模（2026-11-24 现算）：**44 本 / 17,513 页 / 12,525,558 字 / 632 章 / 14,869 图（配注 13,619）**，全部通过程序门禁；题库 9 套 / 5,594 题（`qbank.py check` 0 错 0 警）。
 
 ## 三态质检
 
@@ -36,8 +36,14 @@ tools/                 全部流水线脚本（核心入口 pipeline.py）
   proofread.py         生成校对清单（必看/参考分级）
   build_tables.py      表格结构重建
   review_batch.py      批量人工复核辅助（裁图、对照表）
+  figgap.py            图版缺口报告（OCR 图注/正文引用/页内图块 + PDF 视觉证据）
+  figure_audit.py      图版审计：原页检出图 vs 书稿裁图，逐图覆盖对照
+  figure_asset_boxes.py 旧资产在原页的定位（多尺度对位 + 低置信留证）
+  layout_parse.py      版式解析：栏位判定 / 行归栏 / 组装不变量
+  reflow_book.py       实验性重排验收（只读 OCR + book.json，输出不写回 books/）
   export_offline.py    导出离线静态版
   qbank*.py            题库生成/校验/导出
+  test_*.py            诊断/复核工具回归测试（unittest，临时目录）
 public/                零依赖 Web 阅读器与练习页（Node server.js，端口 4590）
 server.js              本地书库服务（零第三方依赖）
 samples/demo-book/     自制 3 页示例样书（无版权内容）
@@ -60,6 +66,9 @@ python tools/pipeline.py one "inbox/some-book.pdf"
 # 已有书稿重跑后处理与质检
 python tools/pipeline.py post "books/some-book"
 python tools/proofread.py "books/some-book"
+
+# 工具回归自检（只读，不写书稿）
+python -m unittest discover -s tools
 
 # 阅读器（先放一本书到 books/ 下，或放示例样书）
 mkdir -p books && cp -r samples/demo-book books/demo-book

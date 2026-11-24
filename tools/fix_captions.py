@@ -3,7 +3,7 @@
 
 规则（按顺序执行，全部幂等）：
 R1 合并切图：同页相邻的两块裁切若属于同一张图（纵向/横向紧贴、投影重叠、尺寸相近）→ 合成一张
-R2 剔除文字误检：无注裁图 OCR 出 ≥3 行文字 → 判为「文字块被误切」，删除（仅 B 类书、图数 ≤400）
+R2 标记疑似文字误检：无注裁图 OCR 出 ≥3 行文字，列为待核候选（仅 B 类书、图数 ≤400）
 R3 裸数字注：同页短行「12 标题…」配给最近的图（现代建筑这类版式）
 R4 正文内嵌注：正文里的「图N 标题」按图号配给无注图（华夏意匠、建筑：形式这类）
 R5 组图复用：同页最近注 → 邻页最近注（只复用「像图注」的注，不复制正文长句）
@@ -15,6 +15,8 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -68,7 +70,7 @@ def _box(b):
         return None
 
 
-def _merge_pair(d, a, b):
+def _merge_pair(d, a, b, staged=None):
     """把 b 拼到 a 的画布上，返回新块（图片写 assets），失败返回 None。"""
     from PIL import Image
     ba, bb = _box(a), _box(b)
@@ -76,11 +78,12 @@ def _merge_pair(d, a, b):
         return None
     if b.get("caption") and a.get("caption") and b["caption"] != a["caption"]:
         return None
-    pa = os.path.join(d, a.get("src") or "")
-    pb = os.path.join(d, b.get("src") or "")
-    if not (os.path.exists(pa) and os.path.exists(pb)):
+    pa = figure_asset(d, a, staged)
+    pb = figure_asset(d, b, staged)
+    if not (pa.is_file() and pb.is_file()):
         return None
-    ia, ib = Image.open(pa).convert("RGB"), Image.open(pb).convert("RGB")
+    with Image.open(pa) as first, Image.open(pb) as second:
+        ia, ib = first.convert("RGB"), second.convert("RGB")
     ux0, uy0 = min(ba[0], bb[0]), min(ba[1], bb[1])
     ux1, uy1 = max(ba[2], bb[2]), max(ba[3], bb[3])
     W, H = int(ux1 - ux0), int(uy1 - uy0)
@@ -91,13 +94,22 @@ def _merge_pair(d, a, b):
     canvas.paste(ib, (int(bb[0] - ux0), int(bb[1] - uy0)))
     out_id = "fig-m-%s" % str(a.get("id") or "x").replace("fig-", "")
     rel = os.path.join("assets", out_id + ".webp")
-    canvas.save(os.path.join(d, rel), "WEBP", quality=88, method=4)
+    target = Path(staged or d) / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(target, "WEBP", quality=88, method=4)
     merged = dict(a)
     merged.update({"id": out_id, "src": rel, "y": int(uy0), "w": W, "h": H, "box": [ux0, uy0, ux1, uy1]})
     return merged
 
 
-def merge_figures(book, d, gap=26):
+def figure_asset(d, block, staged):
+    rel = block.get("src") or ""
+    if staged and (Path(staged) / rel).is_file():
+        return Path(staged) / rel
+    return Path(d) / rel
+
+
+def merge_figures(book, d, gap=26, staged=None, merges=None):
     blocks = [b for b in book["blocks"] if b.get("type") == "figure"]
     bypage = {}
     for b in blocks:
@@ -122,7 +134,7 @@ def merge_figures(book, d, gap=26):
                     vertical = (abs(bb[1] - ba[3]) <= gap or abs(ba[1] - bb[3]) <= gap) and ovx >= 0.72 * min(wa, wb)
                     horizontal = (abs(bb[0] - ba[2]) <= gap or abs(ba[0] - bb[2]) <= gap) and ovy >= 0.72 * min(ha, hb)
                     if vertical or horizontal:
-                        new = _merge_pair(d, a if ba[1] <= bb[1] else b, b if ba[1] <= bb[1] else a)
+                        new = _merge_pair(d, a, b, staged)
                         if not new:
                             continue
                         keep, drop = a, b
@@ -131,6 +143,9 @@ def merge_figures(book, d, gap=26):
                         book["blocks"].remove(drop)
                         figs = [x for x in figs if x is not drop]
                         figs[figs.index(keep) if keep in figs else 0] = new
+                        if merges is not None:
+                            merges.append({"page": page, "inputs": [a.get("id"), b.get("id")],
+                                           "output": new["id"], "box": new["box"]})
                         merged_n += 1
                         changed = True
                         break
@@ -149,19 +164,18 @@ def text_lines(img_path):
     return len(res or [])
 
 
-def drop_text_fragments(book, d, budget=400):
+def text_fragment_candidates(book, d, budget=400, staged=None):
     figs = [b for b in book["blocks"] if b.get("type") == "figure" and not b.get("caption")]
-    dropped = 0
+    candidates = []
     for i, b in enumerate(figs):
         if i >= budget:
             break
-        p = os.path.join(d, b.get("src") or "")
-        if not os.path.exists(p):
+        p = figure_asset(d, b, staged)
+        if not p.is_file():
             continue
-        if text_lines(p) >= 3:
-            book["blocks"].remove(b)
-            dropped += 1
-    return dropped
+        if text_lines(str(p)) >= 3:
+            candidates.append(b)
+    return candidates
 
 
 # ------------------------------------------------------------------ R3/R4/R5
@@ -446,12 +460,22 @@ def stats_of(book):
 
 
 def run(d, do_merge=True, do_ocr=True, dry=False):
+    if dry and do_merge:
+        with TemporaryDirectory(prefix="caption-preview-") as staged:
+            return _run(d, do_merge, do_ocr, dry, staged)
+    return _run(d, do_merge, do_ocr, dry)
+
+
+def _run(d, do_merge, do_ocr, dry, staged=None):
     bj = os.path.join(d, "book.json")
-    book = json.load(open(bj, encoding="utf-8"))
+    with open(bj, encoding="utf-8-sig") as stream:
+        book = json.load(stream)
     f0, c0 = stats_of(book)
+    original_figures = [b for b in book["blocks"] if b.get("type") == "figure"]
+    merges = []
     changed = {}
     if do_merge:
-        changed["合并切图"] = merge_figures(book, d)
+        changed["合并切图"] = merge_figures(book, d, staged=staged, merges=merges)
     changed["合并重叠图"] = merge_overlapping(book)
     prof = {}
     try:
@@ -461,8 +485,10 @@ def run(d, do_merge=True, do_ocr=True, dry=False):
     except Exception:
         prof = {}
     f1, c1 = stats_of(book)
+    text_candidates = []
     if do_ocr and "B" in (prof.get("classes") or []) and f1 <= 400:
-        changed["剔除文字误检"] = drop_text_fragments(book, d)
+        text_candidates = text_fragment_candidates(book, d, staged=staged)
+        changed["疑似文字误检"] = len(text_candidates)
     changed["裸数字注"] = caption_numbered(book)
     changed["内嵌注"] = caption_inline(book)
     changed["组图复用"] = caption_reuse(book)
@@ -474,8 +500,19 @@ def run(d, do_merge=True, do_ocr=True, dry=False):
     book["stats"]["figures"] = f2
     book["stats"]["paired"] = c2
     out = {"图": (f0, f2), "配注": (c0, c2), "明细": changed}
+    remaining = {b.get("id") for b in book["blocks"] if b.get("type") == "figure"}
+    removed = [b for b in original_figures if b.get("id") not in remaining]
+    out["合并计划"] = merges
+    out["移出图块"] = [{"page": b.get("page"), "id": b.get("id"), "src": b.get("src")} for b in removed]
+    out["疑似文字误检图块"] = [{"page": b.get("page"), "id": b.get("id"), "src": b.get("src")}
+                         for b in text_candidates]
     if not dry:
-        json.dump(book, open(bj, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        if removed or text_candidates:
+            from figure_cleanup_log import record_removal
+            record_removal(d, "fix_captions", removed, {"merges": merges, "counts": changed,
+                                                       "text_fragment_candidates": text_candidates})
+        with open(bj, "w", encoding="utf-8") as stream:
+            json.dump(book, stream, ensure_ascii=False, indent=1)
     return out
 
 
@@ -488,6 +525,8 @@ def main():
         r = run(d, do_merge="--no-merge" not in sys.argv, do_ocr="--no-ocr" not in sys.argv, dry=dry)
         print("== %s 图 %d->%d 配注 %d->%d 明细 %s" % (
             os.path.basename(d)[:40], r["图"][0], r["图"][1], r["配注"][0], r["配注"][1], r["明细"]))
+        if dry:
+            print(json.dumps(r, ensure_ascii=False))
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Safety tests for staged batch preparation and application on disposable books."""
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,13 +12,25 @@ import page_surgery
 import review_batch
 
 
+def run_cli(*args):
+    result = subprocess.run(
+        [sys.executable, *args],
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        capture_output=True,
+    )
+    # Decode in the test thread so an unexpected encoding fails the test.
+    return subprocess.CompletedProcess(
+        result.args,
+        result.returncode,
+        stdout=result.stdout.decode("utf-8"),
+        stderr=result.stderr.decode("utf-8"),
+    )
+
+
 class ReviewBatchTests(unittest.TestCase):
     def setUp(self):
-        test_root = (Path(__file__).resolve().parent.parent / "_工作记录").resolve()
-        self.temp = tempfile.TemporaryDirectory(prefix="review_batch_test_", dir=test_root)
+        self.temp = tempfile.TemporaryDirectory(prefix="review_batch_test_")
         self.root = Path(self.temp.name).resolve()
-        if self.root.parent != test_root:
-            raise RuntimeError("测试目录不在指定工作区中")
         self.bookdir = self.root / "book"
         self.bookdir.mkdir()
         self.bookfile = self.bookdir / "book.json"
@@ -74,7 +87,7 @@ class ReviewBatchTests(unittest.TestCase):
         self.book["blocks"][0]["text"] = "之后的变更。"
         self.write_book()
         before = self.bookfile.read_bytes()
-        proc = subprocess.run([sys.executable, str(Path(page_surgery.__file__)), str(ready)], capture_output=True, text=True, encoding="utf-8")
+        proc = run_cli(page_surgery.__file__, str(ready))
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("书稿已变化", proc.stdout + proc.stderr)
         self.assertEqual(self.bookfile.read_bytes(), before)
@@ -92,14 +105,14 @@ class ReviewBatchTests(unittest.TestCase):
         reg = {"page": 1, "start_prefix": "一段正文甲", "last_prefix": "一段正文甲", "blocks": [self.book["blocks"][0]]}
         review = {"evidence": [str(self.evidence)], "verified": True}
         manifest = self.manifest([reg], [review])
-        cli = [sys.executable, str(Path(review_batch.__file__)), str(manifest)]
+        cli = [review_batch.__file__, str(manifest)]
         out = self.root / "out"
-        missing = subprocess.run(cli + ["--out", str(out), "--ready"], capture_output=True, text=True, encoding="utf-8")
+        missing = run_cli(*cli, "--out", str(out), "--ready")
         self.assertNotEqual(missing.returncode, 0)
-        dry = subprocess.run(cli + ["--out", str(out)], capture_output=True, text=True, encoding="utf-8")
+        dry = run_cli(*cli, "--out", str(out))
         self.assertEqual(dry.returncode, 0, dry.stderr)
         dry_file = out / "批量试算计划.json"
-        ready = subprocess.run(cli + ["--out", str(out), "--ready", "--dry-plan", str(dry_file)], capture_output=True, text=True, encoding="utf-8")
+        ready = run_cli(*cli, "--out", str(out), "--ready", "--dry-plan", str(dry_file))
         self.assertEqual(ready.returncode, 0, ready.stderr)
         self.assertTrue(json.loads((out / "已核批量计划.json").read_text(encoding="utf-8"))["apply"])
 
@@ -111,7 +124,7 @@ class ReviewBatchTests(unittest.TestCase):
         self.assertEqual(report["region_count"], 2)
         ready = self.root / "ready.json"
         ready.write_text(json.dumps(merged, ensure_ascii=False), encoding="utf-8")
-        proc = subprocess.run([sys.executable, str(Path(page_surgery.__file__)), str(ready)], capture_output=True, text=True, encoding="utf-8")
+        proc = run_cli(page_surgery.__file__, str(ready))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         after = json.loads(self.bookfile.read_text(encoding="utf-8"))
         self.assertEqual(after["blocks"][0]["text"], "一段正文甲乙。")

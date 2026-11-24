@@ -13,6 +13,7 @@
     qBarFill: document.getElementById('qBarFill'),
     qMeta: document.getElementById('qMeta'),
     qType: document.getElementById('qType'),
+    qCard: document.getElementById('qCard'),
     qChapter: document.getElementById('qChapter'),
     qDiff: document.getElementById('qDiff'),
     qStem: document.getElementById('qStem'),
@@ -22,6 +23,7 @@
     prevBtn: document.getElementById('prevBtn'),
     nextBtn: document.getElementById('nextBtn'),
     qCounter: document.getElementById('qCounter'),
+    srcSummary: document.getElementById('srcSummary'),
     wrongPanel: document.getElementById('wrongPanel'),
     wrongList: document.getElementById('wrongList'),
     wpClose: document.getElementById('wpClose')
@@ -36,6 +38,10 @@
   var submitted = false;
   var selected = '';
   var blankInputs = [];
+  var checkMap = {};        // qid -> {v:'g'|'a'|'r', r:题干与原文段的 2-gram 重合率}
+  var checkState = 'idle';  // idle | loading | done | failed
+  var onlySuspect = false;
+  var SRC_KEY = 'zhuxue-src-check:';
 
   var TYPE_NAME = { choice: '选择题', blank: '填空题', term: '名词解释', short: '简答题' };
   var TYPE_ORDER = ['choice', 'blank', 'term', 'short'];
@@ -84,6 +90,7 @@
       buildFilters();
       bindEvents();
       rebuild(true);
+      verifySources();
     }).catch(function (e) {
       document.body.innerHTML = '<div class="loading">加载失败：' + esc(e.message) + '</div>';
     });
@@ -144,6 +151,7 @@
     var ty = els.typeSel.value;
     var mode = els.modeSel.value;
     view = questions.filter(function (q) {
+      if (onlySuspect && !(checkMap[q.id] && checkMap[q.id].v === 'r')) return false;
       if (ch && q.chapter !== ch) return false;
       if (ty && q.type !== ty) return false;
       var rec = answerMap[q.id];
@@ -171,6 +179,7 @@
     els.qBody.innerHTML = '';
     els.qActions.innerHTML = '';
     updateStats();
+    renderSummary();
 
     if (!view.length) {
       els.qMeta.textContent = '没有符合条件的题目';
@@ -190,6 +199,7 @@
     els.qDiff.textContent = ['', '难度 1', '难度 2', '难度 3'][q.difficulty || 0] || '';
     els.qStem.textContent = q.stem;
     els.qCounter.textContent = (idx + 1) + ' / ' + view.length;
+    renderSourceBadge(q);
 
     var prev = answerMap[q.id];
     if (q.type === 'choice') renderChoice(q, prev);
@@ -297,6 +307,15 @@
   }
 
   function sourceUrl(q) {
+    var u = readerHref(q);
+    if (checkMap[q.id]) {
+      var st = { g: 'green', a: 'amber', r: 'red' }[checkMap[q.id].v];
+      if (st) u += (u.indexOf('?') >= 0 ? '&' : '?') + 'check=' + st;
+    }
+    return u;
+  }
+
+  function readerHref(q) {
     if (typeof window.__READER_HREF__ === 'function') {
       var h = window.__READER_HREF__(bookId, q.page || 1, q.block);
       if (h) return h;
@@ -304,6 +323,169 @@
     var u = 'reader.html?book=' + encodeURIComponent(bookId) + '&page=' + (q.page || 1);
     if (q.block != null) u += '&block=' + q.block;
     return u;
+  }
+
+  /* ---------------- 出处核验：题干 ↔ 原文段（与离线脚本 _b_expected.py 同一套规则） ---------------- */
+  function srcNorm(s) {
+    return String(s == null ? '' : s)
+      .replace(/\s+/g, '')
+      .replace(/[，。、；：！？（）()「」“”‘’"'’,.;:!?\-—…]/g, '')
+      .toLowerCase();
+  }
+  function srcBigrams(s) {
+    var o = {};
+    for (var i = 0; i + 1 < s.length; i++) o[s.substr(i, 2)] = 1;
+    return o;
+  }
+  function srcLcs(a, b) {
+    var max = Math.min(8, a.length);
+    for (var L = max; L >= 4; L--) {
+      for (var i = 0; i + L <= a.length; i++) {
+        if (b.indexOf(a.substr(i, L)) >= 0) return L;
+      }
+    }
+    return 0;
+  }
+  function blockWindow(blocks, b) {
+    var s = '';
+    for (var k = Math.max(0, b - 2); k <= Math.min(blocks.length - 1, b + 2); k++) s += blocks[k].text || '';
+    return s;
+  }
+  function judgeSource(q, blocks, heads) {
+    var stem = srcNorm(q.stem || '');
+    var b = q.block;
+    if (!stem || typeof b !== 'number' || b < 0 || b >= blocks.length) return { v: 'r', r: 0 };
+    var win = srcNorm(blockWindow(blocks, b));
+    if (!win) return { v: 'r', r: 0 };
+    var sg = srcBigrams(stem);
+    var wg = srcBigrams(win);
+    var hit = 0, total = 0, k;
+    for (k in sg) { if (sg.hasOwnProperty(k)) { total++; if (wg[k]) hit++; } }
+    var rw = total ? hit / total : 0;
+    var term = stem.length >= 2 && (win.indexOf(stem) >= 0 || heads.indexOf(stem) >= 0);
+    var l = srcLcs(stem, win);
+    var v = (term || rw >= 0.30 || l >= 6) ? 'g' : (rw >= 0.15 || l >= 4) ? 'a' : 'r';
+    return { v: v, r: Math.round(rw * 100) / 100 };
+  }
+
+  function verifySources() {
+    if (!questions.length) return;
+    var key = SRC_KEY + bookId;
+    try {
+      var cached = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (cached && cached.n === questions.length && cached.map) {
+        checkMap = cached.map;
+        checkState = 'done';
+        applyChecks();
+        return;
+      }
+    } catch (e) {}
+    checkState = 'loading';
+    renderSummary();
+    fetch('/api/books/' + encodeURIComponent(bookId)).then(function (r) {
+      if (!r.ok) throw new Error('no book');
+      return r.json();
+    }).then(function (j) {
+      var blocks = (j.data && j.data.blocks) || [];
+      if (!blocks.length) throw new Error('empty book');
+      var heads = '';
+      blocks.forEach(function (b) { if (b.type === 'heading') heads += b.text || ''; });
+      heads = srcNorm(heads);
+      var map = {};
+      questions.forEach(function (q) { map[q.id] = judgeSource(q, blocks, heads); });
+      checkMap = map;
+      checkState = 'done';
+      try {
+        sessionStorage.setItem(key, JSON.stringify({ n: questions.length, v: 1, map: map }));
+      } catch (e) {}
+      applyChecks();
+    }).catch(function () {
+      checkState = 'failed';
+      renderSummary();
+      if (view.length) renderSourceBadge(view[idx]);
+    });
+  }
+
+  function applyChecks() {
+    renderSummary();
+    if (onlySuspect) { rebuild(false); return; }
+    if (view.length) renderSourceBadge(view[idx]);
+  }
+
+  function renderSummary() {
+    if (!els.srcSummary) return;
+    if (checkState === 'idle') { els.srcSummary.classList.add('hidden'); return; }
+    els.srcSummary.classList.remove('hidden');
+    if (checkState === 'loading') {
+      els.srcSummary.innerHTML = '<span class="q-src-tip">出处核验中…</span>';
+      return;
+    }
+    if (checkState === 'failed') {
+      els.srcSummary.innerHTML = '<span class="q-src-tip">核验不可用：没找到这本书的正文，徽标只做跳转</span>';
+      return;
+    }
+    var g = 0, a = 0, r = 0;
+    questions.forEach(function (q) {
+      var c = checkMap[q.id];
+      if (!c) return;
+      if (c.v === 'g') g++; else if (c.v === 'a') a++; else r++;
+    });
+    var html = '<span class="q-src-tip">出处核验：</span>' +
+      '<span class="q-src-chip ok">已核 ' + g + '</span>' +
+      '<span class="q-src-chip warn">弱 ' + a + '</span>';
+    if (r) {
+      html += '<button type="button" class="q-src-chip bad' + (onlySuspect ? ' is-active' : '') +
+        '" id="srcSuspectBtn">可疑 ' + r + (onlySuspect ? '（取消筛选）' : '（点此只看可疑）') + '</button>';
+    } else {
+      html += '<span class="q-src-chip bad">可疑 0</span>';
+    }
+    els.srcSummary.innerHTML = html;
+    var sb = document.getElementById('srcSuspectBtn');
+    if (sb) sb.addEventListener('click', function () {
+      if (checkState !== 'done') { toast('核验还没完成'); return; }
+      onlySuspect = !onlySuspect;
+      rebuild(true);
+    });
+  }
+
+  /* 出处徽标：题干上方常驻；核验完按档位上色，答题前就能点去原文 */
+  function renderSourceBadge(q) {
+    var old = els.qCard.querySelector('.q-source-btn');
+    if (old) old.parentNode.removeChild(old);
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'q-source-btn';
+    var hasPage = q.page != null && q.page !== '';
+    var hasBlock = q.block != null && q.block !== '';
+    if (!hasPage && !hasBlock) {
+      btn.textContent = '出处 · 未标注';
+      btn.disabled = true;
+      btn.title = '这道题没有记录页码/段号';
+      els.qDiff.insertAdjacentElement('afterend', btn);
+      return;
+    }
+    var parts = [];
+    if (hasPage) parts.push('第 ' + q.page + ' 页');
+    if (hasBlock) parts.push('段 ' + q.block);
+    var loc = parts.join(' · ');
+    var ck = checkMap[q.id];
+    var prefix = '出处 · ';
+    if (ck) {
+      if (ck.v === 'g') { prefix = '出处已核 · '; btn.classList.add('is-green'); }
+      else if (ck.v === 'a') { prefix = '弱匹配 · '; btn.classList.add('is-amber'); }
+      else { prefix = '出处可疑 · '; btn.classList.add('is-red'); }
+      btn.title = '题干与该段关键词重合 ' + Math.round((ck.r || 0) * 100) + '%' +
+        (ck.v === 'g' ? '（对得上）' : ck.v === 'a' ? '（大致对上）' : '（对不上，可能页码或段号偏移）');
+    } else {
+      btn.classList.add('is-pending');
+      btn.title = checkState === 'loading' ? '出处核验中…' :
+        (checkState === 'failed' ? '核验不可用，点开看原文' : '跳到原文出处');
+    }
+    btn.textContent = prefix + loc;
+    btn.addEventListener('click', function () {
+      window.open(sourceUrl(q), '_blank', 'noopener');
+    });
+    els.qDiff.insertAdjacentElement('afterend', btn);
   }
 
   function submitCurrent() {

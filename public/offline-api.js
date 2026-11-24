@@ -8,6 +8,7 @@
   var DATA = window.__OFFLINE__ || {};
   var ROUTES = window.__BOOK_ROUTES__ || {};
   var QB_INDEX = window.__QBANK_INDEX__ || [];
+  var SRC_BOOKS = window.__SRC_BOOKS__ || {};   // 刷题页内嵌的正文块（供出处核验）
   var KEYS = {
     progress: 'zhuxue-offline-progress',
     bookmarks: 'zhuxue-offline-bookmarks',
@@ -117,6 +118,11 @@
     if (m && method === 'GET') {
       if (DATA.book && decodeURIComponent(m[1]) === (DATA.bookId || (DATA.book && DATA.book.id))) {
         return reply(DATA.book);
+      }
+      // 刷题页的出处核验要正文块：practice.html 里内嵌了本题库所属书的 blocks
+      var sb = SRC_BOOKS[decodeURIComponent(m[1])];
+      if (sb && sb.blocks) {
+        return reply({ data: { id: sb.bookId, title: sb.title, blocks: sb.blocks } });
       }
       return fail('书不存在');
     }

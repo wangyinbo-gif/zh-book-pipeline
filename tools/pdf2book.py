@@ -19,7 +19,6 @@ from collections import Counter
 
 import numpy as np
 from PIL import Image, ImageFilter
-from rapidocr_onnxruntime import RapidOCR
 import pypdfium2 as pdfium
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1116,6 +1115,8 @@ def main():
         pass
     use_text = args.text_layer == "on" or (args.text_layer == "auto" and has_text_layer(args.pdf))
     def _make_engine():
+        from rapidocr_onnxruntime import RapidOCR
+
         cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rapidocr_threads.yaml")
         if os.path.exists(cfg):     # 多进程并发时限制 ONNX 线程，避免线程争抢拖慢整体
             try:

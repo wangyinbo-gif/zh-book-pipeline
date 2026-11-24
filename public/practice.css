@@ -130,3 +130,57 @@
   .q-nav .btn { min-height: 40px; }
   .wrong-panel { width: 100%; flex-basis: 100%; }
 }
+
+/* ---------------- 出处红线徽标 ---------------- */
+.q-source-btn {
+  margin-left: auto;
+  border: 0;
+  border-left: 3px solid #c0392b;
+  border-radius: 6px;
+  background: rgba(192, 57, 43, 0.07);
+  color: #a93226;
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 3px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.q-source-btn:hover { background: rgba(192, 57, 43, 0.15); }
+.q-source-btn:disabled { border-left-color: #b9b2ae; background: rgba(0, 0, 0, 0.04); color: #8a847f; cursor: default; }
+
+/* ---------------- 出处核验：三档配色 + 汇总条 ---------------- */
+.q-source-btn.is-green { border-left-color: #1e8449; background: rgba(30, 132, 73, 0.08); color: #1e6b3a; }
+.q-source-btn.is-green:hover { background: rgba(30, 132, 73, 0.16); }
+.q-source-btn.is-amber { border-left-color: #b9770e; background: rgba(185, 119, 14, 0.09); color: #935f0b; }
+.q-source-btn.is-amber:hover { background: rgba(185, 119, 14, 0.17); }
+.q-source-btn.is-red { border-left-color: #c0392b; background: rgba(192, 57, 43, 0.09); color: #a93226; }
+.q-source-btn.is-red:hover { background: rgba(192, 57, 43, 0.17); }
+.q-source-btn.is-pending { border-left-color: #b9b2ae; background: rgba(0, 0, 0, 0.03); color: #6f6a66; }
+
+.q-src-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  width: min(820px, 100%);
+  margin: 0 auto 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.q-src-summary .q-src-tip { margin-right: 2px; }
+.q-src-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  background: #fff;
+  color: var(--ink);
+  line-height: 1.6;
+}
+.q-src-chip.ok { border-color: rgba(30, 132, 73, 0.35); color: #1e6b3a; background: rgba(30, 132, 73, 0.06); }
+.q-src-chip.warn { border-color: rgba(185, 119, 14, 0.35); color: #935f0b; background: rgba(185, 119, 14, 0.07); }
+.q-src-chip.bad { border-color: rgba(192, 57, 43, 0.35); color: #a93226; background: rgba(192, 57, 43, 0.06); cursor: pointer; font: inherit; }
+.q-src-chip.bad:hover { background: rgba(192, 57, 43, 0.14); }
+.q-src-chip.bad.is-active { background: #c0392b; border-color: #c0392b; color: #fff; }

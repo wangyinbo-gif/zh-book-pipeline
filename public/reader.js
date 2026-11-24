@@ -49,6 +49,9 @@
   let double = savedDouble ? savedDouble !== '0' : window.innerWidth >= 1000;
   let saveTimer = null;
   let bookmarks = [];
+  let blockEls = [];     // 块下标 → 该块渲染出的 DOM 元素（段落跨页会拆成多个 <p>）
+  let sourceBi = null;   // 当前高亮的出处块下标
+  let sourceBanner = null;
 
   /* ---------------- 数据 ---------------- */
   async function load() {
@@ -118,6 +121,7 @@
     els.pageInput.placeholder = '1–' + pages.length;
     renderBookmarks();
     markBookmarks();
+    if (Number.isFinite(qBlock) && blockEls[qBlock]) highlightSource(qBlock);
   }
 
   function renderChrome() {
@@ -275,20 +279,31 @@
       }
       return best;
     }
-    function flowParagraph(text) {
+    function tagBlock(bi, el) {
+      if (bi == null) return el;
+      el.dataset.block = String(bi);
+      (blockEls[bi] || (blockEls[bi] = [])).push(el);
+      return el;
+    }
+    function flowParagraph(text, bi) {
       let rest = text;
       let guard = 0;
       while (rest.length && guard++ < 200) {
         const el = para(rest);
         cur.appendChild(el);
-        if (!over()) return;
+        if (!over()) { tagBlock(bi, el); return; }
         cur.removeChild(el);
         const fit = findFit(rest);
         if (fit <= 0) {
-          if (cur.childNodes.length === 0) { cur.appendChild(para(rest)); return; }
+          if (cur.childNodes.length === 0) {
+            const only = para(rest);
+            cur.appendChild(only);
+            tagBlock(bi, only);
+            return;
+          }
           newPage(); continue;
         }
-        cur.appendChild(para(rest.slice(0, fit)));
+        cur.appendChild(tagBlock(bi, para(rest.slice(0, fit))));
         rest = rest.slice(fit);
         newPage();
       }
@@ -347,9 +362,9 @@
     newPage();
     blocks.forEach((b, i) => {
       blockPage[i] = curIndex;
-      if (b.type === 'paragraph') { flowParagraph(b.text); return; }
+      if (b.type === 'paragraph') { flowParagraph(b.text, i); return; }
       if (b.type === 'table') { flowTable(b); return; }
-      const el = b.type === 'heading' ? heading(b.text) : b.type === 'figure' ? figure(b) : b.type === 'table' ? tableBlock(b) : para(b.text || '');
+      const el = tagBlock(i, b.type === 'heading' ? heading(b.text) : b.type === 'figure' ? figure(b) : b.type === 'table' ? tableBlock(b) : para(b.text || ''));
       cur.appendChild(el);
       if (over()) {
         cur.removeChild(el);
@@ -428,7 +443,64 @@
     els.next.disabled = n >= pages.length - 1;
     updateToc();
     if (!keep) scheduleSave();
+    if (sourceBi != null) {
+      const sp = pageOfBlock(sourceBi);
+      if (sp != null && vis.indexOf(sp) < 0) clearSource();
+    }
   }
+
+  /* ---------------- 题库出处标记（?block=N 进来时画红线） ---------------- */
+  function pageOfBlock(bi) {
+    const bp = window.__readerInfo && window.__readerInfo.blockPage;
+    return bp && bp[bi] != null ? bp[bi] : null;
+  }
+
+  function clearSource() {
+    if (sourceBanner) { sourceBanner.remove(); sourceBanner = null; }
+    if (sourceBi != null && blockEls[sourceBi]) {
+      blockEls[sourceBi].forEach((el) => el.classList.remove('q-source-hit'));
+    }
+    sourceBi = null;
+  }
+
+  function highlightSource(bi) {
+    clearSource();
+    const els = blockEls[bi];
+    if (!els || !els.length) return;
+    sourceBi = bi;
+    els.forEach((el) => el.classList.add('q-source-hit'));
+    const first = els[0];
+    if (first && reflowMode() && typeof first.scrollIntoView === 'function') {
+      try { first.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+      catch (e) { first.scrollIntoView(); }
+    }
+    const bar = document.createElement('div');
+    bar.className = 'q-source-banner';
+    const check = params.get('check');
+    const stMap = { green: ['is-green', ' · 已核'], amber: ['is-amber', ' · 弱匹配'], red: ['is-red', ' · 可疑'] };
+    const st = stMap[check];
+    if (st) bar.classList.add(st[0]);
+    const txt = document.createElement('span');
+    const qpParam = parseInt(params.get('page'), 10);
+    txt.textContent = '本题出处 · 第 ' + ((Number.isFinite(qpParam) && qpParam > 0) ? qpParam : ((pageOfBlock(bi) || 0) + 1)) + ' 页' + (st ? st[1] : '');
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'q-source-close';
+    x.setAttribute('aria-label', '关闭出处标记');
+    x.textContent = '×';
+    x.addEventListener('click', clearSource);
+    bar.appendChild(txt);
+    if (check === 'red') {
+      const hint = document.createElement('span');
+      hint.className = 'q-source-hint';
+      hint.textContent = '该段与题干关键词重合较低，可能页码偏移';
+      bar.appendChild(hint);
+    }
+    bar.appendChild(x);
+    document.body.appendChild(bar);
+    sourceBanner = bar;
+  }
+
   function reflowMode() {
     return window.innerWidth <= 600 ||
       (window.innerWidth <= 1200 && window.innerWidth > window.innerHeight);

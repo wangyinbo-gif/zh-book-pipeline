@@ -29,6 +29,7 @@ __pycache__/
 # 本地
 .bookroot
 *.log
+reflow/
 
 # 样书生成的报告（可由 tools/proofread.py 重新生成）
 samples/**/校对清单.md

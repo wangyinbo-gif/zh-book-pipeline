@@ -12,7 +12,6 @@
 结构：index.html（书架）+ reader-<hash>.html（每本一个）+ practice-<hash>.html（每个题库一个）
       + data/routes.js + data/books.js + offline-api.js + books/<hash>/assets/ + 使用说明.txt
 """
-from paths import ROOT, BOOKS
 import argparse
 import hashlib
 import json
@@ -180,12 +179,38 @@ def render_reader(template, book_id, book):
     return replace_once(to_relative(template), '<script src="reader.js"></script>', block)
 
 
-def render_practice(template, book_id, bank):
+def practice_book_blob(book_id, banks):
+    """给刷题页内嵌正文块，供「出处核验」用。
+
+    practice.js 的 verifySources() 会 fetch('/api/books/<id>')。离线包里有 44 本书、
+    44 个 reader 页，但只有 9 个 practice 页——把书全塞进每个刷题页会让包暴涨。
+    所以这里只内嵌「有题库的那些书」的 blocks（问答用到的书就这几本），
+    放在 window.__SRC_BOOKS__ 里，由 offline-api.js 的 /api/books/<id> 分支返回。
+    """
+    if not book_id:
+        return None
+    bp = os.path.join(BOOKS, book_id, 'book.json')
+    if not os.path.isfile(bp):
+        return None
+    book = json.loads(read_text(bp))
+    blocks = book.get('blocks')
+    if not isinstance(blocks, list):
+        return None
+    return {
+        'bookId': book_id,
+        'title': book.get('title') or book_id,
+        'blocks': [{'type': b.get('type'), 'text': b.get('text') or ''} for b in blocks],
+    }
+
+
+def render_practice(template, book_id, bank, book_blob=None):
     data = {'page': 'practice', 'bookId': book_id, 'bank': bank}
     block = (
         '<script src="data/routes.js"></script>\n'
         '<script>window.__OFFLINE__=' + embed_json(data) + ';</script>\n'
-        '<script src="offline-api.js"></script>\n'
+        + ('<script>window.__SRC_BOOKS__=' + embed_json({book_id: book_blob}) + ';</script>\n'
+           if book_blob else '')
+        + '<script src="offline-api.js"></script>\n'
         '<script src="practice.js"></script>'
     )
     return replace_once(to_relative(template), '<script src="practice.js"></script>', block)
@@ -404,8 +429,10 @@ def build(out_dir, copy=False, dry_run=False, no_assets=False):
             write_text(os.path.join(tmp, routes[name]['reader']),
                        render_reader(read_text(os.path.join(PUBLIC, 'reader.html')), name, book))
             if name in banks:
+                blob = practice_book_blob(name, banks)
                 write_text(os.path.join(tmp, routes[name]['practice']),
-                           render_practice(read_text(os.path.join(PUBLIC, 'practice.html')), name, banks[name]))
+                           render_practice(read_text(os.path.join(PUBLIC, 'practice.html')), name,
+                                           banks[name], blob))
             if no_assets:
                 continue
             src_assets = os.path.join(d, 'assets')

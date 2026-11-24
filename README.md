@@ -55,7 +55,7 @@ docs/                  架构、质检、硬规矩、数据说明
 环境：Python 3.10+（开发用 3.12）、Node.js（仅阅读器需要）。
 
 ```bash
-pip install pymupdf pypdfium2 rapidocr-onnxruntime pillow numpy
+pip install pymupdf pypdfium2 opencv-python-headless rapidocr-onnxruntime pillow numpy
 
 # 书库根目录：其下有 books/、题库/、data/、inbox/
 export BOOKROOT=/path/to/library        # Windows: set BOOKROOT=D:\library

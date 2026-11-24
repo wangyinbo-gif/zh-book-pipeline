@@ -28,7 +28,7 @@ jobs:
           PY
       - name: 工具回归测试
         run: |
-          python -m pip install --quiet pillow
+          python -m pip install --quiet pillow numpy pypdfium2 pymupdf
           python -m unittest discover -s tools -p "test_*.py"
       - name: 样书结构校验
         run: |

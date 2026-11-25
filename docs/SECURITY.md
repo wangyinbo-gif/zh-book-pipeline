@@ -12,18 +12,22 @@ designed to be exposed to the public internet without additional protection.
 
 ## Hardening items (priority order)
 
-Status update 2026-11-25: **all P0 items shipped in v1.0.1**; P1 asset-path normalize shipped,
-field validation pending; P2 items still open.
+Status update 2026-11-25 (v1.0.2): **P0 + P1 complete; P2 shipped** (opt-in `AUTH_TOKEN`
+gate for write APIs + `tools/test_server_security.js` wired into CI, 26 cases green locally
+and in a repo-shaped layout).
 
 | Priority | Item | State |
 |---|---|---|
 | P0 | Request body size limit (memory DoS on `/api/*` writes) | **Fixed v1.0.1** — 256 KB cap, 413 |
 | P0 | Robust `decodeURIComponent` + top-level error handling | **Fixed v1.0.1** — 400 on illegal encoding |
 | P0 | Don't leak internal error messages to clients | **Fixed v1.0.1** — generic 500 text |
-| P1 | Field-level validation (bookId/chapter/page length & range) | Open |
-| P1 | Path traversal defense tightening (asset sub-path normalize) | **Partial v1.0.1** — normalize + prefix check |
-| P2 | Lite auth for write APIs when bound to LAN | Open |
-| P2 | Security regression tests (413/400/403 cases) | Smoke-verified manually; in-repo test open |
+| P1 | Field-level validation (bookId/chapter/page length & range) | **Fixed v1.0.2** — ids ≤120 & no separators/NUL, page numeric+bounded, chapter ≤200; invalid input never reaches disk |
+| P1 | Path traversal defense (asset sub-path + URL id + NUL) | **Fixed v1.0.2** — normalize + prefix + length checks + NUL rejection |
+| P2 | Lite auth for write APIs | **v1.0.2** — opt-in `AUTH_TOKEN` env; when set, non-GET `/api/*` requires `Authorization: Bearer`. Frontend does not send it yet: enabling in LAN mode blocks client writes with 401 (documented tradeoff) |
+| P2 | Security regression tests | **Fixed v1.0.2** — `node tools/test_server_security.js` in CI (413/400/403/401 + normal-flow no-regression), runs in isolated `BOOKROOT` temp dir |
+
+`server.js` also gained a `BOOKROOT` env override (same convention as `tools/paths.py`):
+set it to serve library data from another directory; defaults to the repo root.
 
 ## Principles
 

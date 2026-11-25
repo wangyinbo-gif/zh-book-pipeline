@@ -9,13 +9,34 @@ const path = require('path');
 const url = require('url');
 const os = require('os');
 
-const ROOT = __dirname;
+const ROOT = process.env.BOOKROOT ? path.resolve(process.env.BOOKROOT) : __dirname;
 const PUBLIC = path.join(ROOT, 'public');
 const BOOKS = path.join(ROOT, 'books');
 const DATA = path.join(ROOT, 'data');
 const QBANK = path.join(ROOT, '题库');
 const PORT = Number(process.env.PORT || 4590);
 const HOST = process.env.HOST || '127.0.0.1';
+// R6：设置 AUTH_TOKEN 后，非 GET /api/* 写接口要求 Authorization: Bearer <token>。
+// 默认不启用（本机/局域网现有前端不带 token，行为与 v1.0.1 一致）。
+const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
+
+/* ---------------- 字段校验（R2/R5） ---------------- */
+const MAX_ID_LEN = 120; // 真实全库 bookId 最长 86 字符（2026-11-25 实测）
+const MAX_PAGE = 200000; // 单本真实最大 679 页
+const MAX_SHORT = 200; // chapter 等短文本
+
+function validId(v) {
+  return (
+    typeof v === 'string' &&
+    v.length > 0 &&
+    v.length <= MAX_ID_LEN &&
+    !/[\\/\0]/.test(v)
+  );
+}
+function numInRange(v, min, max) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= min && n <= max ? n : null;
+}
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -244,6 +265,7 @@ function api(req, res, pathname, query) {
   if (mBook && req.method === 'GET') {
     const bArg = safeDecode(mBook[1]);
     if (bArg === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
+    if (bArg.length > MAX_ID_LEN) return sendJSON(res, 400, { ok: false, error: 'bookId 过长' });
     const book = getBook(bArg);
     if (!book) return sendJSON(res, 404, { ok: false, error: '书不存在' });
     return sendJSON(res, 200, { ok: true, data: book });
@@ -257,11 +279,17 @@ function api(req, res, pathname, query) {
       if (!body) return sendJSON(res, 400, { ok: false, error: '请求体不是合法 JSON' });
       const progress = loadProgress();
       const { bookId, chapterId, page, total } = body;
-      if (!bookId) return sendJSON(res, 400, { ok: false, error: '缺少 bookId' });
+      if (!validId(bookId)) return sendJSON(res, 400, { ok: false, error: 'bookId 非法' });
+      if (chapterId != null && (typeof chapterId !== 'string' || chapterId.length > MAX_SHORT)) {
+        return sendJSON(res, 400, { ok: false, error: 'chapterId 非法' });
+      }
+      const p = numInRange(page == null ? 0 : page, 0, MAX_PAGE);
+      const t = numInRange(total == null ? 0 : total, 0, MAX_PAGE);
+      if (p === null || t === null) return sendJSON(res, 400, { ok: false, error: 'page/total 超出范围' });
       progress.books[bookId] = {
         chapterId: chapterId || null,
-        page: Number(page) || 0,
-        total: Number(total) || 0,
+        page: p,
+        total: t,
         updatedAt: Date.now()
       };
       saveProgress(progress);
@@ -271,6 +299,9 @@ function api(req, res, pathname, query) {
   }
   if (pathname === '/api/bookmarks' && req.method === 'GET') {
     const bookId = String((query && query.bookId) || '');
+    if (bookId.length > MAX_ID_LEN || /[\\/\0]/.test(bookId)) {
+      return sendJSON(res, 400, { ok: false, error: 'bookId 非法' });
+    }
     const db = loadBookmarks();
     const items = db.items
       .filter((x) => !bookId || x.bookId === bookId)
@@ -281,9 +312,12 @@ function api(req, res, pathname, query) {
     readBody(req, (body, err) => {
       if (err === 'TOO_LARGE') return sendJSON(res, 413, { ok: false, error: '请求体过大' });
       if (!body) return sendJSON(res, 400, { ok: false, error: '请求体不是合法 JSON' });
-      const bookId = String(body.bookId || '');
-      const page = Number(body.page) || 0;
-      if (!bookId || page <= 0) return sendJSON(res, 400, { ok: false, error: '缺少 bookId 或 page' });
+      if (!validId(body.bookId)) return sendJSON(res, 400, { ok: false, error: 'bookId 非法' });
+      const bookId = String(body.bookId);
+      const page = numInRange(body.page, 1, MAX_PAGE);
+      if (page === null) return sendJSON(res, 400, { ok: false, error: 'page 超出范围' });
+      const chapter = body.chapter == null ? '' : String(body.chapter);
+      if (chapter.length > MAX_SHORT) return sendJSON(res, 400, { ok: false, error: 'chapter 过长' });
       const db = loadBookmarks();
       const dup = db.items.find((x) => x.bookId === bookId && x.page === page);
       if (dup) return sendJSON(res, 200, { ok: true, data: { item: dup, existed: true } });
@@ -291,7 +325,7 @@ function api(req, res, pathname, query) {
         id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
         bookId,
         page,
-        chapter: String(body.chapter || ''),
+        chapter,
         excerpt: String(body.excerpt || '').slice(0, 120),
         createdAt: Date.now()
       };
@@ -306,6 +340,7 @@ function api(req, res, pathname, query) {
   if (mBm && req.method === 'DELETE') {
     const id = safeDecode(mBm[1]);
     if (id === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
+    if (id.length > MAX_ID_LEN) return sendJSON(res, 400, { ok: false, error: 'id 过长' });
     const db = loadBookmarks();
     const before = db.items.length;
     db.items = db.items.filter((x) => x.id !== id);
@@ -321,6 +356,7 @@ function api(req, res, pathname, query) {
   if (mQ && req.method === 'GET') {
     const qArg = safeDecode(mQ[1]);
     if (qArg === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
+    if (qArg.length > MAX_ID_LEN) return sendJSON(res, 400, { ok: false, error: 'bookId 过长' });
     const bank = loadBank(qArg);
     if (!bank) return sendJSON(res, 404, { ok: false, error: '题库不存在' });
     return sendJSON(res, 200, { ok: true, data: bank });
@@ -332,17 +368,19 @@ function api(req, res, pathname, query) {
     readBody(req, (body, err) => {
       if (err === 'TOO_LARGE') return sendJSON(res, 413, { ok: false, error: '请求体过大' });
       if (!body) return sendJSON(res, 400, { ok: false, error: '请求体不是合法 JSON' });
-      const bookId = String(body.bookId || '');
-      const questionId = String(body.questionId || '');
-      if (!bookId || !questionId) {
-        return sendJSON(res, 400, { ok: false, error: '缺少 bookId 或 questionId' });
+      if (!validId(body.bookId) || !validId(body.questionId)) {
+        return sendJSON(res, 400, { ok: false, error: 'bookId/questionId 非法' });
       }
+      const bookId = String(body.bookId);
+      const questionId = String(body.questionId);
+      const type = body.type == null ? '' : String(body.type);
+      if (type.length > MAX_SHORT) return sendJSON(res, 400, { ok: false, error: 'type 过长' });
       const db = loadPractice();
       db.books[bookId] = db.books[bookId] || { answered: {} };
       db.books[bookId].answered[questionId] = {
         correct: !!body.correct,
         chosen: body.chosen == null ? '' : String(body.chosen).slice(0, 200),
-        type: String(body.type || ''),
+        type,
         at: Date.now()
       };
       db.books[bookId].updatedAt = Date.now();
@@ -355,7 +393,11 @@ function api(req, res, pathname, query) {
   if (mP && req.method === 'DELETE') {
     const qid = safeDecode(mP[1]);
     if (qid === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
+    if (qid.length > MAX_ID_LEN) return sendJSON(res, 400, { ok: false, error: 'questionId 过长' });
     const onlyBook = String((query && query.bookId) || '');
+    if (onlyBook.length > MAX_ID_LEN || /[\\/\0]/.test(onlyBook)) {
+      return sendJSON(res, 400, { ok: false, error: 'bookId 非法' });
+    }
     const db = loadPractice();
     const targets = onlyBook ? [onlyBook] : Object.keys(db.books);
     let hit = 0;
@@ -414,12 +456,23 @@ const server = http.createServer((req, res) => {
     return sendJSON(res, 400, { ok: false, error: '请求路径编码非法' });
   }
   if (pathname.startsWith('/api/')) {
+    // R4：解码后仍含空字节一律拒
+    if (pathname.indexOf('\0') !== -1) {
+      return sendJSON(res, 400, { ok: false, error: '路径含非法字符' });
+    }
+    // R6：启用 AUTH_TOKEN 后写接口必须带 Bearer
+    if (AUTH_TOKEN && req.method !== 'GET' && req.headers.authorization !== 'Bearer ' + AUTH_TOKEN) {
+      return sendJSON(res, 401, { ok: false, error: '未授权' });
+    }
     try {
       return api(req, res, pathname, parsed.query || {});
     } catch (e) {
       console.error('[api]', e);
       return sendJSON(res, 500, { ok: false, error: '服务器错误' });
     }
+  }
+  if (pathname.indexOf('\0') !== -1) {
+    return sendJSON(res, 400, { ok: false, error: '路径含非法字符' });
   }
   // 书籍资源
   const mAsset = pathname.match(/^\/books\/([^/]+)\/(.+)$/);
@@ -452,6 +505,10 @@ server.listen(PORT, HOST, () => {
           console.log('  平板/手机访问：http://' + ni.address + ':' + PORT + '  （同一 Wi-Fi）');
         }
       }
+    }
+    if (!AUTH_TOKEN) {
+      console.log('  ⚠ 局域网模式未启用认证：同 Wi-Fi 设备可读写进度/书签/作答。');
+      console.log('    启用：set AUTH_TOKEN=<口令>（写接口需 Authorization: Bearer；前端暂未带 token，启用后前端写入会被 401 拒绝，属预期）。');
     }
   }
   console.log('书库目录：' + BOOKS);

@@ -39,3 +39,8 @@ jobs:
           assert book["stats"]["pages"] == book["pages"]
           print("demo ok:", book["title"], len(book["blocks"]), "blocks")
           PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: 服务端安全回归 R1-R6（413/400/403/401）
+        run: node tools/test_server_security.js

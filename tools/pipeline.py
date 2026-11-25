@@ -895,6 +895,40 @@ def gate(book_dir, write_profile=True):
                if (c.get("chars") or 0) < 300 and not re.match(r"^(前言|索引|附录|参考文献)", str(c.get("title") or "")))
     toc_ok = (dup <= max(1, len(titles) // 10)) and sec_only == 0 and tiny <= max(1, len(titles) // 10)
     add("目录结构", toc_ok, f"{len(titles)} 项 · 重名 {dup} · 纯节标题 {sec_only} · 空章 {tiny}")
+
+    def _volno(t):
+        m = re.match(r"^(?:[\u4e00-\u9fff]{1,8}\s*)?第\s*([0-9一二三四五六七八九十百]{1,3})\s*卷\s*$", t)
+        if not m:
+            m = re.match(r"^卷\s*第?\s*([0-9一二三四五六七八九十百]{1,3})(?:\s*[\u4e00-\u9fff]{1,8})?$", t)
+        if not m:
+            m = re.match(r"^[\u4e00-\u9fff]{2,8}\s*卷\s*([0-9一二三四五六七八九十百]{1,3})\s*$", t)
+        return m.group(1) if m else None
+
+    def _vn(s):
+        if s.isdigit():
+            return int(s)
+        d = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+        if s == "十":
+            return 10
+        if s.startswith("十"):
+            return 10 + d.get(s[1:], 0)
+        if s.endswith("十"):
+            return d.get(s[0], 0) * 10
+        if "十" in s:
+            a, b = s.split("十", 1)
+            return (d.get(a, 1) * 10) + d.get(b, 0)
+        return d.get(s, 0)
+    # 卷序连续（2026-11-25 坑1 配套护栏）：仅 ≥2 个卷式标题的章触发；
+    # 主库现代书（第N章体）天然不适用 → 恒绿，gate 矩阵不变（回归 R4 验证）。
+    nums = sorted(_vn(x) for x in (_volno(t) for t in titles) if x)
+    uniq = sorted(set(nums))
+    if len(uniq) < 2:
+        add("卷序连续", True, "非卷系章节")
+    else:
+        gaps = [i for i in range(uniq[0], uniq[-1] + 1) if i not in uniq]
+        add("卷序连续", not gaps and uniq[0] == 1,
+            f"{len(uniq)} 卷 · 缺 {'、'.join(map(str, gaps)) or '无'}"
+            + ("" if uniq[0] == 1 else f" · 起点非一（自 {uniq[0]} 起）"))
     hsplit, hbody = hard_splits(book)
     rate = hsplit / max(1, hbody)
     add("句中截断", rate < 0.01, f"{hsplit}/{hbody}（{rate:.2%}）")
@@ -1142,7 +1176,8 @@ def _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages):
     marker = read_json(marker_path, {}) or {}
     done = marker.get("done", {}) or {}
     for st in stages:
-        if st == "chapters2" and not need_chapter_fix(book_dir):
+        if st == "chapters2" and not need_chapter_fix(book_dir) and not args.force:
+            # --force：章节数达标但形态可疑（如卷序断档）的书稿，强制重建（2026-11-25 坑1 回归配套）
             log("  - chapters2: 章节数正常，跳过", fp)
             done[st] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "seconds": 0}
             marker = {"version": 1, "pdf": pdf, "scale": args.scale, "done": done}

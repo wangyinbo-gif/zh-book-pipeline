@@ -19,6 +19,26 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CN_NUM = "一二三四五六七八九十"
+VOLNUM = r"[0-9一二三四五六七八九十百]{1,3}"
+
+
+def vol_int(s):
+    """中文/阿拉伯卷号 → 整数（一~九十九够用）。"""
+    s = (s or "").strip()
+    if s.isdigit():
+        return int(s)
+    d = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if s == "十":
+        return 10
+    if s.startswith("十"):
+        return 10 + d.get(s[1:], 0)
+    if s.endswith("十"):
+        return d.get(s[0], 0) * 10
+    if "十" in s:
+        a, b = s.split("十", 1)
+        return (d.get(a, 1) * 10) + d.get(b, 0)
+    return d.get(s, 0)
+
 
 
 def norm(s):
@@ -191,32 +211,52 @@ def chapters_ethnic(book_dir, pages):
 def chapters_generic(book_dir, pages):
     """通用章节识别（无「第N章」的书）：
     1) 页眉/正文里重复出现的「第N讲/第N篇/第N卷」→ 按编号取首次出现页
-    1b) 点校体卷系「卷第一 / 卷二 城东」（2026-11-25 A1 改1）：
-        纯标题资格过滤防正文引用行，同编号 ≥2 页命中取第 2 次（目录页必早于正文卷端）
+    1b) 点校体卷系池（A1 改1 + 坑1 2026-11-25）三种形态合并：
+        「卷第一 / 卷二 城东」A1 原形；「第三卷」纯题；「乃粒第一卷/铸第八卷」篇名前置式
+        （含 1 字残断卷端，天工开物实证）。同编号按页聚类（≤3 页并一档，对翻页重印目录），
+        取第 2 档 = 正文卷端；再按卷号升序、页码单调过滤（目录残留页倒序自动弃）。
+        编号断档不再整体弃用（缺卷是 OCR 丢卷端，不是假阳性；断档由 gate「卷序连续」项兜底）。
     2) 上/中/下篇
     3) 页面上部的竖排大字标题（A1 改3：对 book.json 图注池做负过滤，防图版说明行做假章）
     """
     # 1b) 卷系点校体（先于「第N讲」尝试：伽蓝记/梦华录类只有 卷第X 形态）
-    vol_pat = re.compile(r"^卷\s*第?\s*([0-9一二三四五六七八九十]{1,3})\s*(.*)$")
+    VOL_FORMS = [
+        re.compile(r"^卷\s*第?\s*(" + VOLNUM + r")\s*(.*)$"),                   # 卷第一 / 卷二 城东
+        re.compile(r"^第\s*(" + VOLNUM + r")\s*卷$"),                           # 第三卷（正文卷端）
+        re.compile(r"^[\u4e00-\u9fff]{1,6}\s*第\s*(" + VOLNUM + r")\s*卷$"),     # 乃粒第一卷 / 铸第八卷（残断 1 字实证）
+    ]
     SENT_END = "。；，！？“”\"'"
     vol_hits = {}
     for n in sorted(pages):
         for ln in pages[n]:
             t = (ln.get("text") or "").strip()
-            m = vol_pat.match(t)
-            if not m:
-                continue
-            rest = (m.group(2) or "").strip()
-            # 纯标题资格：剩余部分短且无句读（防「卷一“城内”之愿会寺…」引用行）
-            if len(rest) > 12 or any(ch in SENT_END for ch in rest):
-                continue
-            vol_hits.setdefault(m.group(1), []).append((t[:30], n))
+            for vp in VOL_FORMS:
+                m = vp.match(t)
+                if not m:
+                    continue
+                rest = (m.group(2) or "").strip() if m.re.groups >= 2 else ""
+                # 纯标题资格：带 rest 的形态须短且无句读（防「卷一“城内”之愿会寺…」引用行）
+                if len(rest) > 12 or any(ch in SENT_END for ch in rest):
+                    break
+                hp = vol_hits.setdefault(m.group(1), [])
+                if not hp or hp[-1][1] != n:   # 同页多行同卷号算一次
+                    hp.append((t[:30], n))
+                break
     if len(vol_hits) >= 2:
-        out = [hits[1] if len(hits) >= 2 else hits[0] for hits in vol_hits.values()]
-        out.sort(key=lambda x: x[1])
+        cands = []
+        for num, hits in vol_hits.items():
+            clusters = []
+            for tt, p in hits:   # hits 已按页升序（扫描序）
+                if clusters and p - clusters[-1][-1][1] <= 3:
+                    clusters[-1].append((tt, p))
+                else:
+                    clusters.append([(tt, p)])
+            pick = clusters[1][0] if len(clusters) >= 2 else clusters[0][0]
+            cands.append((vol_int(num), pick[0], pick[1]))
+        cands.sort()
         res = []
-        for t, p in out:
-            if res and p - res[-1][1] < 2:   # 多卷挤同一目录页 → 判为目录命中，不采信
+        for _v, t, p in cands:
+            if res and p <= res[-1][1] + 1:   # 卷号升序下页码必须前进，否则是目录残留
                 continue
             res.append((t, p))
         if len(res) >= 2:

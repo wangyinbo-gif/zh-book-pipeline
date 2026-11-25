@@ -12,6 +12,10 @@ CAP2 = re.compile(r"^图\s?\d{1,4}(?![0-9])")
 CAP3 = re.compile(r"^\d{1,2}\s?[.·]\s?\d{1,2}(\s?[.·]\s?\d{1,2}){0,2}$")
 TABLE_CAP = re.compile(r"^表\s?\d{1,3}(\s?[—\-–.·]\s?\d{1,2}){0,3}")
 DRAW = re.compile(r"(总平面图|总平面|平面图|立面图|剖面图|透视图|鸟瞰图|轴测图|详图|大样图|示意图|布置图|效果图|施工图|结构图|室内图|外观|内景|平面|立面|剖面)$")
+# 坑2（2026-11-25，天工开物实证）：图版书把「（左/右…初刻本）插图N：题名。」熔进正文段落，
+# 段首/段尾/段中都出现。位置字开头时允许跟一段无句读的出处说明（如「左一六三七年(明崇祯十年)《天工开物》初刻本」）。
+GJ = re.compile(r"(?P<pre>[左右]\s*[^。；，！？]{0,18}?(?:初刻本|原图)?|(?:初刻本|原图)?)?"
+                r"插图\s*(?P<n>[0-9〇一二三四五六七八九十]{1,4})\s*[：:]\s*(?P<title>[^。；，！？|]{0,16})?")
 
 
 def load_pages(book_dir):
@@ -96,6 +100,34 @@ def main():
                 cand.sort()
                 best = (cand[0][1], TABLE_CAP.match(cand[0][1]).group(0))
                 bestd = cand[0][0]   # 关键：更新距离，否则最后 bestd<900 判断会拦住
+
+        if not best:
+            # 坑2：同页正文/说明块里的「(右…初刻本)插图N：题名。」熔段 → 提出配对并从段里剔除该行
+            cands2 = []
+            for pb in blocks:
+                if pb.get("page") != pg or pb.get("type") not in ("paragraph", "caption"):
+                    continue
+                ptxt = pb.get("text") or ""
+                if "插图" not in ptxt:
+                    continue
+                for m3 in GJ.finditer(ptxt):
+                    key3 = "插图" + m3.group("n")
+                    if key3 in used:
+                        continue
+                    cands2.append((abs((pb.get("y") or 0) - fy), pb, m3.start(), m3.end(),
+                                   key3, m3.group("title")))
+            cands2.sort(key=lambda x: x[0])
+            for d3, pb, s3, e3, key3, ttl in cands2:
+                if d3 >= 900:
+                    break
+                title = (ttl or "").strip(" ：:、")
+                cap = "插图%s" % key3[2:] + (("：" + title) if title else "")
+                if e3 < len(pb.get("text") or "") and (pb.get("text") or "")[e3] == "。":
+                    e3 += 1
+                pb["text"] = ((pb.get("text") or "")[:s3] + (pb.get("text") or "")[e3:]).strip()
+                best = (cap, key3)
+                bestd = d3
+                break
 
         if not best:
             # 图纸型插图：用「一层平面图/西立面图/总平面」这类标注当图注

@@ -842,8 +842,50 @@ def cmd_recheck(args):
     return 0
 
 
+def body_metrics(book):
+    """无参考代理指标（A1 标定）：句读密度、块长分布、整页图版占比。
+
+    只读 book.json 的 blocks，不依赖 OCR 原文，故可用于任何已转换书稿。
+    """
+    blocks = book.get("blocks") or []
+    cjk = lambda c: "\u4e00" <= c <= "\u9fff"  # noqa: E731
+    punct_set = set("、。，；：？！…—·「」『』（）《》〈〉")
+    han = punct = body_tu = 0
+    plens = []
+    par_chars = {}
+    fig_pages = []
+    for b in blocks:
+        t = b.get("text") or ""
+        btype = b.get("type")
+        if btype in ("paragraph", "note"):
+            han += sum(1 for c in t if cjk(c))
+            punct += sum(1 for c in t if c in punct_set)
+            n = len(re.sub(r"\s", "", t))
+            plens.append(n)
+            pg = b.get("page") or 0
+            par_chars[pg] = par_chars.get(pg, 0) + n
+            if btype == "paragraph":
+                body_tu += t.count("图")
+        elif btype == "figure":
+            fig_pages.append(b.get("page") or 0)
+    lonely = sum(1 for pg in fig_pages if par_chars.get(pg, 0) < 50)
+    return {
+        "han": han,
+        "punct_per100": (100.0 * punct / han) if han else 0.0,
+        "avg_blk": (sum(plens) / len(plens)) if plens else 0.0,
+        "short_rate": (sum(1 for n in plens if n < 10) / len(plens)) if plens else 0.0,
+        "figs": len(fig_pages),
+        "lonely_share": (lonely / len(fig_pages)) if fig_pages else 0.0,
+        "body_tu": body_tu,
+    }
+
+
 def gate(book_dir, write_profile=True):
-    """7 项门槛 + 1 项结构诊断。
+    """12 项门槛 + 1 项结构诊断。
+
+    2026-11-25 A1（gate 判据增补 v1）新增 3 项：章结构下限 / 可读性抽样 / 句读密度；
+    图注两项新增「整页图版自动豁免」（整页单图页≥80% 且正文无「图」字 → 原书无图注排版）。
+    阈值全部由 44 主库 + 8 公开书实测分布标定，主库零误伤（snap2 R4 验证）。
 
     write_profile=False 时只读不写（比对/复查用），避免把 book.json 的 profile 重写一遍。
     """
@@ -864,6 +906,7 @@ def gate(book_dir, write_profile=True):
     prof = book_profile(book)
     classes = prof["classes"]
     sd = structure_diag(book)
+    bm = body_metrics(book)
     cpp = max(stats.get("chars", 0), sd["chars"]) / pages
     min_cpp = 20 if "A" in classes else 60
     add("每页字数", min_cpp <= cpp <= 2000, f"{cpp:.0f} 字/页" + ("（A 图录型）" if "A" in classes else ""))
@@ -875,8 +918,11 @@ def gate(book_dir, write_profile=True):
     paired = 1.0 if figs == 0 else paired_count / figs
     # 统一 98% 门槛；只有「原书完全没图注」的书经人工确认后豁免
     # B1（2026-11-25）：小图量书（≤20 图）分母失真，改用绝对量下限——缺 ≤2 视为过
+    # B3（2026-11-25 A1）：整页书影页（整页单图 ≥80% 且正文无「图」字）自动豁免，
+    #   替代逐本人手 figure_caption_exempt 标记（陶庵梦忆 44 张整页书影即为该类）
     cap_min = 0.98
-    cap_exempt = bool(book.get("figure_caption_exempt"))
+    auto_exempt = bool(bm["figs"] and bm["lonely_share"] >= 0.8 and bm["body_tu"] == 0)
+    cap_exempt = bool(book.get("figure_caption_exempt")) or auto_exempt
     small_figs = figs <= 20
     pair_ok = paired >= cap_min or (small_figs and figs - paired_count <= 2)
     add("图注配对", cap_exempt or figs == 0 or pair_ok,
@@ -929,6 +975,25 @@ def gate(book_dir, write_profile=True):
         add("卷序连续", not gaps and uniq[0] == 1,
             f"{len(uniq)} 卷 · 缺 {'、'.join(map(str, gaps)) or '无'}"
             + ("" if uniq[0] == 1 else f" · 起点非一（自 {uniq[0]} 起）"))
+    # A1 新增三项（阈值见《gate-判据增补_v1_20261125.md》，44 主库零误伤）
+    chapters_n = stats.get("chapters", 0)
+    big_book = bm["han"] >= 100000
+    thin = chapters_n <= 1 and big_book
+    add("章结构下限", not thin,
+        f"{chapters_n} 章 / {bm['han']} 字" + ("（≥10 万字却仅 1 章，疑卷/章未识别）" if thin else ""))
+    # 可读性抽样：三信号计数（≥2 才判红）。单信号在主库有先例，两信号组合 44 本零误伤。
+    signals = [
+        bm["short_rate"] >= 0.18,                       # 短块（<10 字）占比过高
+        0 < bm["avg_blk"] < 70,                         # 平均块长过短（主库最小 70.4）
+        not (5.0 <= bm["punct_per100"] <= 18.0),        # 句读密度偏离（主库 5.4–16.4）
+    ]
+    bad_read = sum(signals) >= 2
+    add("可读性抽样", not bad_read,
+        f"句读 {bm['punct_per100']:.1f}/百字 · 平均块长 {bm['avg_blk']:.0f} · "
+        f"短块率 {bm['short_rate']:.1%} · 信号 {sum(signals)}/3"
+        + ("（疑文字乱序或竖排误读）" if bad_read else ""))
+    add("句读密度", bm["punct_per100"] >= 3.0,
+        f"{bm['punct_per100']:.1f}/百字（下限 3.0，主库实测最低 5.4）")
     hsplit, hbody = hard_splits(book)
     rate = hsplit / max(1, hbody)
     add("句中截断", rate < 0.01, f"{hsplit}/{hbody}（{rate:.2%}）")

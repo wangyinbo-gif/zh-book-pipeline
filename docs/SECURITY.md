@@ -10,17 +10,20 @@ designed to be exposed to the public internet without additional protection.
 - The server stores user data (`data/progress.json`, `data/bookmarks.json`, `data/practice.json`)
   and serves book content only from the `books/` directory.
 
-## Known hardening items (priority order)
+## Hardening items (priority order)
 
-| Priority | Item | Current state |
+Status update 2026-11-25: **all P0 items shipped in v1.0.1**; P1 asset-path normalize shipped,
+field validation pending; P2 items still open.
+
+| Priority | Item | State |
 |---|---|---|
-| P0 | Request body size limit (memory DoS on `/api/*` writes) | Missing — `readBody` accumulates unlimited |
-| P0 | Robust `decodeURIComponent` + top-level error handling | Partial — illegal `%` sequences throw |
-| P0 | Don't leak internal error messages to clients | Missing — `e.message` returned on 500 |
-| P1 | Field-level validation (bookId/chapter/page length & range) | Missing — lengths unbounded |
-| P1 | Path traversal defense tightening (asset sub-path normalize) | Partial — `startsWith(BOOKS)` guard exists |
-| P2 | Lite auth for write APIs when bound to LAN | Missing |
-| P2 | Security regression tests (413/400/403 cases) | Missing |
+| P0 | Request body size limit (memory DoS on `/api/*` writes) | **Fixed v1.0.1** — 256 KB cap, 413 |
+| P0 | Robust `decodeURIComponent` + top-level error handling | **Fixed v1.0.1** — 400 on illegal encoding |
+| P0 | Don't leak internal error messages to clients | **Fixed v1.0.1** — generic 500 text |
+| P1 | Field-level validation (bookId/chapter/page length & range) | Open |
+| P1 | Path traversal defense tightening (asset sub-path normalize) | **Partial v1.0.1** — normalize + prefix check |
+| P2 | Lite auth for write APIs when bound to LAN | Open |
+| P2 | Security regression tests (413/400/403 cases) | Smoke-verified manually; in-repo test open |
 
 ## Principles
 

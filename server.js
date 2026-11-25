@@ -31,6 +31,15 @@ function sendJSON(res, code, payload) {
   res.end(body);
 }
 
+/* 路由段二次解码兜底：非法 % 序列返回 null，调用方回 400 */
+function safeDecode(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch (e) {
+    return null;
+  }
+}
+
 function readJSON(file, fallback) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -192,10 +201,30 @@ function loadPractice() {
 function savePractice(db) {
   writeJSON(PRACTICE_FILE, db);
 }
+/* ---------------- 请求体（限额） ---------------- */
+const MAX_BODY_BYTES = 256 * 1024; // 256 KB，防内存 DoS
+
+/**
+ * 读取 JSON 请求体。
+ * cb(body, err)：err='TOO_LARGE' 表示超限；body=null 表示非法 JSON。
+ * 超限后吞掉剩余数据（req.resume）避免连接挂起。
+ */
 function readBody(req, cb) {
   let raw = '';
-  req.on('data', (c) => (raw += c));
+  let size = 0;
+  let done = false;
+  req.on('data', (c) => {
+    if (done) return;
+    size += c.length;
+    if (size > MAX_BODY_BYTES) {
+      done = true;
+      req.resume();
+      return cb(null, 'TOO_LARGE');
+    }
+    raw += c;
+  });
   req.on('end', () => {
+    if (done) return;
     let body = {};
     try {
       body = JSON.parse(raw || '{}');
@@ -213,7 +242,9 @@ function api(req, res, pathname, query) {
   }
   const mBook = pathname.match(/^\/api\/books\/([^/]+)$/);
   if (mBook && req.method === 'GET') {
-    const book = getBook(decodeURIComponent(mBook[1]));
+    const bArg = safeDecode(mBook[1]);
+    if (bArg === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
+    const book = getBook(bArg);
     if (!book) return sendJSON(res, 404, { ok: false, error: '书不存在' });
     return sendJSON(res, 200, { ok: true, data: book });
   }
@@ -221,15 +252,9 @@ function api(req, res, pathname, query) {
     return sendJSON(res, 200, { ok: true, data: loadProgress() });
   }
   if (pathname === '/api/progress' && req.method === 'PUT') {
-    let raw = '';
-    req.on('data', (c) => (raw += c));
-    req.on('end', () => {
-      let body = {};
-      try {
-        body = JSON.parse(raw || '{}');
-      } catch (e) {
-        return sendJSON(res, 400, { ok: false, error: '请求体不是合法 JSON' });
-      }
+    readBody(req, (body, err) => {
+      if (err === 'TOO_LARGE') return sendJSON(res, 413, { ok: false, error: '请求体过大' });
+      if (!body) return sendJSON(res, 400, { ok: false, error: '请求体不是合法 JSON' });
       const progress = loadProgress();
       const { bookId, chapterId, page, total } = body;
       if (!bookId) return sendJSON(res, 400, { ok: false, error: '缺少 bookId' });
@@ -253,7 +278,8 @@ function api(req, res, pathname, query) {
     return sendJSON(res, 200, { ok: true, data: { items } });
   }
   if (pathname === '/api/bookmarks' && req.method === 'POST') {
-    readBody(req, (body) => {
+    readBody(req, (body, err) => {
+      if (err === 'TOO_LARGE') return sendJSON(res, 413, { ok: false, error: '请求体过大' });
       if (!body) return sendJSON(res, 400, { ok: false, error: '请求体不是合法 JSON' });
       const bookId = String(body.bookId || '');
       const page = Number(body.page) || 0;
@@ -278,7 +304,8 @@ function api(req, res, pathname, query) {
   }
   const mBm = pathname.match(/^\/api\/bookmarks\/([^/]+)$/);
   if (mBm && req.method === 'DELETE') {
-    const id = decodeURIComponent(mBm[1]);
+    const id = safeDecode(mBm[1]);
+    if (id === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
     const db = loadBookmarks();
     const before = db.items.length;
     db.items = db.items.filter((x) => x.id !== id);
@@ -292,7 +319,9 @@ function api(req, res, pathname, query) {
   }
   const mQ = pathname.match(/^\/api\/questions\/([^/]+)$/);
   if (mQ && req.method === 'GET') {
-    const bank = loadBank(decodeURIComponent(mQ[1]));
+    const qArg = safeDecode(mQ[1]);
+    if (qArg === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
+    const bank = loadBank(qArg);
     if (!bank) return sendJSON(res, 404, { ok: false, error: '题库不存在' });
     return sendJSON(res, 200, { ok: true, data: bank });
   }
@@ -300,7 +329,8 @@ function api(req, res, pathname, query) {
     return sendJSON(res, 200, { ok: true, data: loadPractice() });
   }
   if (pathname === '/api/practice' && req.method === 'POST') {
-    readBody(req, (body) => {
+    readBody(req, (body, err) => {
+      if (err === 'TOO_LARGE') return sendJSON(res, 413, { ok: false, error: '请求体过大' });
       if (!body) return sendJSON(res, 400, { ok: false, error: '请求体不是合法 JSON' });
       const bookId = String(body.bookId || '');
       const questionId = String(body.questionId || '');
@@ -323,7 +353,8 @@ function api(req, res, pathname, query) {
   }
   const mP = pathname.match(/^\/api\/practice\/([^/]+)$/);
   if (mP && req.method === 'DELETE') {
-    const qid = decodeURIComponent(mP[1]);
+    const qid = safeDecode(mP[1]);
+    if (qid === null) return sendJSON(res, 400, { ok: false, error: '路径编码非法' });
     const onlyBook = String((query && query.bookId) || '');
     const db = loadPractice();
     const targets = onlyBook ? [onlyBook] : Object.keys(db.books);
@@ -375,19 +406,25 @@ function serveFile(res, file) {
 
 const server = http.createServer((req, res) => {
   const parsed = url.parse(req.url, true);
-  const pathname = decodeURIComponent(parsed.pathname || '/');
+  let pathname;
+  try {
+    pathname = decodeURIComponent(parsed.pathname || '/');
+  } catch (e) {
+    // 非法 % 编码：不抛给顶层，直接 400
+    return sendJSON(res, 400, { ok: false, error: '请求路径编码非法' });
+  }
   if (pathname.startsWith('/api/')) {
     try {
       return api(req, res, pathname, parsed.query || {});
     } catch (e) {
       console.error('[api]', e);
-      return sendJSON(res, 500, { ok: false, error: e.message || '服务器错误' });
+      return sendJSON(res, 500, { ok: false, error: '服务器错误' });
     }
   }
   // 书籍资源
   const mAsset = pathname.match(/^\/books\/([^/]+)\/(.+)$/);
   if (mAsset) {
-    const file = path.join(BOOKS, path.basename(mAsset[1]), mAsset[2]);
+    const file = path.join(BOOKS, path.basename(mAsset[1]), path.normalize(mAsset[2]));
     if (file.startsWith(BOOKS)) return serveFile(res, file);
     return res.writeHead(403).end('Forbidden');
   }

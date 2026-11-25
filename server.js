@@ -20,6 +20,42 @@ const HOST = process.env.HOST || '127.0.0.1';
 // 默认不启用（本机/局域网现有前端不带 token，行为与 v1.0.1 一致）。
 const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
 
+/* ---------------- 路径边界（P0-01） ---------------- */
+// 严格判断 target 是否位于 base 之内（base 自身算通过）。
+// 不能用 file.startsWith(base)：books 与 books-private 这类「相邻前缀目录」会误通过。
+function withinDir(base, target) {
+  const rel = path.relative(base, target);
+  if (rel === '') return true;
+  if (path.isAbsolute(rel)) return false;
+  return rel !== '..' && !rel.startsWith('..' + path.sep);
+}
+
+// 把 parts 解析到 base 下并做边界校验（含符号链接真实路径）；越界/无法判定返回 null。
+function resolveInside(base, ...parts) {
+  const baseAbs = path.resolve(base);
+  const target = path.resolve(baseAbs, ...parts);
+  if (!withinDir(baseAbs, target)) return null;
+  let baseReal;
+  try { baseReal = fs.realpathSync(baseAbs); } catch (e) { baseReal = baseAbs; }
+  // 从 target 往上找最近的已存在祖先，取它 realpath 后拼回剩余路径段：
+  // 这样既能识别目标本身是符号链接，也能识别「父目录是符号链接指向外部」。
+  let probe = target;
+  let rest = '';
+  for (let i = 0; i < 64; i++) {
+    let real = null;
+    try { real = fs.realpathSync(probe); } catch (e) { real = null; }
+    if (real !== null) {
+      const effective = rest ? path.join(real, rest) : real;
+      return withinDir(baseReal, effective) ? target : null;
+    }
+    const parent = path.dirname(probe);
+    if (parent === probe) return null;
+    rest = path.join(path.basename(probe), rest);
+    probe = parent;
+  }
+  return null;
+}
+
 /* ---------------- 字段校验（R2/R5） ---------------- */
 const MAX_ID_LEN = 120; // 真实全库 bookId 最长 86 字符（2026-11-25 实测）
 const MAX_PAGE = 200000; // 单本真实最大 679 页
@@ -129,8 +165,9 @@ function listBooks() {
 
 function getBook(id) {
   const safe = path.basename(String(id || ''));
-  const file = path.join(BOOKS, safe, 'book.json');
-  if (!file.startsWith(BOOKS) || !fs.existsSync(file)) return null;
+  // P0-01：safe 可能是 '..'，basename 并不能兜住 → 一律走 resolveInside 边界校验
+  const file = resolveInside(BOOKS, safe, 'book.json');
+  if (!file || !fs.existsSync(file)) return null;
   return readJSON(file, null);
 }
 
@@ -190,8 +227,10 @@ function loadBank(bookId) {
   const safe = path.basename(String(bookId || ''));
   if (!safe || safe[0] === '_') return null;
   const hit = qbankIndex().get(safe);
-  if (!hit || !hit.file.startsWith(QBANK)) return null;
-  return readJSON(hit.file, null);
+  if (!hit) return null;
+  const file = resolveInside(QBANK, hit.file); // P0-01：索引来自磁盘遍历，仍复核边界
+  if (!file) return null;
+  return readJSON(file, null);
 }
 
 function questionIndex() {
@@ -477,13 +516,15 @@ const server = http.createServer((req, res) => {
   // 书籍资源
   const mAsset = pathname.match(/^\/books\/([^/]+)\/(.+)$/);
   if (mAsset) {
-    const file = path.join(BOOKS, path.basename(mAsset[1]), path.normalize(mAsset[2]));
-    if (file.startsWith(BOOKS)) return serveFile(res, file);
-    return res.writeHead(403).end('Forbidden');
+    // P0-01：bookId 段可能是 '..'，mAsset[2] 也可能含 ../ → 边界校验后再服务
+    const file = resolveInside(BOOKS, path.basename(mAsset[1]), mAsset[2]);
+    if (!file) return res.writeHead(403).end('Forbidden');
+    return serveFile(res, file);
   }
-  const rel = pathname === '/' ? '/index.html' : pathname;
-  const file = path.join(PUBLIC, path.normalize(rel));
-  if (!file.startsWith(PUBLIC)) {
+  // 静态资源：rel 必须以相对形式交给 resolveInside（绝对路径段会重置到盘根）
+  const rel = pathname === '/' ? 'index.html' : pathname.replace(/^[\\/]+/, '');
+  const file = resolveInside(PUBLIC, rel);
+  if (!file) {
     res.writeHead(403).end('Forbidden');
     return;
   }

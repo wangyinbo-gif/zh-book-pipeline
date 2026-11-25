@@ -3,7 +3,8 @@
  * server.js 安全回归测试（零依赖，Node 18+）
  * 用法：node tools/test_server_security.js
  * 覆盖：R1 请求体上限(413) / R2 字段校验(400) / R3 编码兜底(400) /
- *       R4 路径穿越与空字节(403/400) / R5 URL id 长度(400) / R6 AUTH_TOKEN(401) / 正常流无回归
+ *       R4 路径穿越与空字节(403/400) / R5 URL id 长度(400) / R6 AUTH_TOKEN(401) /
+ *       R7 路径边界（P0-01 相邻前缀目录 + 符号链接）/ 正常流无回归
  * 隔离：spawn 服务器时 BOOKROOT 指向 mkdtemp 临时书库根，不碰真实 data/。
  */
 const fs = require('fs');
@@ -33,6 +34,12 @@ function mkTmpRoot() {
   fs.writeFileSync(path.join(root, '题库', 'testbook.json'), JSON.stringify({
     bookId: 'testbook', bookTitle: '测试书', chapters: [], questions: [{ id: 't-001', type: 'choice' }],
   }));
+  // P0-01 夹具：与 books / public 共享字符串前缀的相邻目录（旧 startsWith 判断会误通过）
+  fs.mkdirSync(path.join(root, 'books-private'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'books-private', 'secret.txt'), 'SIBLING-SECRET');
+  fs.mkdirSync(path.join(root, 'public-private'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'public-private', 'secret.txt'), 'PUBLIC-SIBLING-SECRET');
+  fs.writeFileSync(path.join(root, 'server.js'), "require('http')"); // 根目录哨兵
   return root;
 }
 
@@ -148,6 +155,33 @@ async function main() {
     check('R4 asset 穿越拒绝', (t.status === 403 || t.status === 404) && !t.body.includes("require('http')"), t.status);
     t = await rawRequest(port, 'GET', '/../../server.js');
     check('R4 静态穿越拒绝', (t.status === 403 || t.status === 404) && !t.body.includes("require('http')"), t.status);
+
+    // ---- R7 P0-01 路径边界：相邻前缀目录 + 符号链接 ----
+    // 旧实现 file.startsWith(BOOKS) 会放行 books-private/（'…/books-private' 以 '…/books' 开头）
+    let sib = await rawRequest(port, 'GET', '/books/../books-private/secret.txt');
+    check('R7 books 相邻前缀目录不泄露', sib.status === 403 && !sib.body.includes('SIBLING-SECRET'), sib.status);
+    sib = await rawRequest(port, 'GET', '/books/testbook/../../books-private/secret.txt');
+    check('R7 books 多级 .. 不泄露', sib.status === 403 && !sib.body.includes('SIBLING-SECRET'), sib.status);
+    sib = await rawRequest(port, 'GET', '/books/%2e%2e/books-private/secret.txt');
+    check('R7 books 编码 .. 不泄露', sib.status === 403 && !sib.body.includes('SIBLING-SECRET'), sib.status);
+    sib = await rawRequest(port, 'GET', '/../public-private/secret.txt');
+    check('R7 public 相邻前缀目录不泄露', sib.status === 403 && !sib.body.includes('PUBLIC-SIBLING-SECRET'), sib.status);
+    sib = await rawRequest(port, 'GET', '/api/books/..');
+    check('R7 API bookId=.. 不泄露根目录 book.json', sib.status === 404, sib.status);
+
+    // 符号链接：库内指向库外 → 必须拒绝（Windows 无权限时跳过，CI Linux 会执行）
+    let linkMade = false;
+    try {
+      fs.symlinkSync(path.join(root, 'books-private'),
+        path.join(root, 'books', 'testbook', 'assets', 'link-out'), 'dir');
+      linkMade = true;
+    } catch (e) { linkMade = false; }
+    if (linkMade) {
+      sib = await rawRequest(port, 'GET', '/books/testbook/assets/link-out/secret.txt');
+      check('R7 符号链接指向库外拒绝', sib.status === 403 && !sib.body.includes('SIBLING-SECRET'), sib.status);
+    } else {
+      console.log('SKIP R7 符号链接（当前系统不允许创建符号链接）');
+    }
 
     // ---- R6 AUTH_TOKEN ----
     child2 = startServer(port2, root, { AUTH_TOKEN: 'sekret' });

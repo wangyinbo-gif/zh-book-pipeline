@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 '''把 ch-N.new.json 汇总成 build 需要的 ch-N.json（不覆盖原始草稿）。'''
 import io, json, os, shutil, sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import ROOT
-DIR = os.path.join(ROOT, "题库", "_parts", "某书")
+DIR = os.path.join(ROOT, "题库", "_parts", "中国建筑史  潘谷西)")
 dry = '--apply' not in sys.argv
 plan = json.load(io.open(os.path.join(DIR, '_plan.json'), encoding='utf-8'))
 tot, miss, per = 0, [], {}

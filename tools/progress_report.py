@@ -1,10 +1,10 @@
-from paths import BOOKS, TOOLS
 import glob, json, os, sys, time
+from paths import ROOT
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-BOOKS = BOOKS
+BOOKS = os.path.join(ROOT, "books")
 STATE = os.path.join(BOOKS, "已汇报_v2.json")
 START = os.path.join(BOOKS, "本批开始时间.txt")
-sys.path.insert(0, TOOLS)
+sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 def batch_start():
     try:

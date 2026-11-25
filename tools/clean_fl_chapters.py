@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
-"""清理某本书的章节：丢掉误识别的「章」（如「第557章」「第37章 和第44章…」），
+"""清理 弗莱彻建筑史 的章节：丢掉误识别的「章」（如「第557章」「第37章 和第44章…」），
 把被丢弃章的内容并入前一章。"""
 import json
+from paths import ROOT
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-Q = os.path.join(ROOT, "inbox", "未达标书稿")
+Q = os.path.join(ROOT, "需人工处理", "未达标书稿")
 GOOD = re.compile(r"^第\s?(\d{1,3})\s?章\s*([\u4e00-\u9fff][^，。；：、（）()]{1,28})$")
 
 
 def main():
     dry = "--dry" in sys.argv
-    d = [x for x in os.listdir(Q) if os.path.isdir(os.path.join(Q, x)) and "书名关键词" in x][0]
+    d = [x for x in os.listdir(Q) if os.path.isdir(os.path.join(Q, x)) and "弗莱彻" in x][0]
     book = json.load(open(os.path.join(os.path.join(Q, d), "book.json"), encoding="utf-8"))
     blocks = book["blocks"]
     chs = book["chapters"]

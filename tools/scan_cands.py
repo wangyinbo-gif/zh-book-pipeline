@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """对全库「横向扁长」候选图做 OCR，判定是否为文字截图，结果写 tools/_fake_candidates.json"""
-from paths import BOOKS
 import json
+from paths import ROOT
 import os
 import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-B = BOOKS
+B = os.path.join(ROOT, "books")
 norm = lambda s: re.sub(r"[^\u4e00-\u9fff]", "", s or "")
 
 
@@ -52,7 +52,7 @@ def main():
         if hits:
             out[book.get("title") or d] = dict(dir=d, total=len(figs), cand=len(cand), hits=hits)
             print("%-28s 候选%-4d 文字截图 %d" % ((book.get("title") or d)[:26], len(cand), len(hits)), flush=True)
-    json.dump(out, open(os.path.join(TOOLS, "_fake_candidates.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    json.dump(out, open(os.path.join(ROOT, "tools", "_fake_candidates.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print("完成，命中书数", len(out))
 
 

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """筑学 · 书稿包后处理：
 - 清掉目录页（OCR 会把目录条目当成正文）
-- 修正书名（去掉下载文件名里的来源站后缀）
+- 修正书名（去掉 z-library 之类后缀）
 - 重新按「第N篇/第N章」建章节（只认真实章节，跳过目录里的条目）
 - 去掉封面页的假插图，重新连续编号并同步正文引用
 """
@@ -16,7 +16,7 @@ CHAP_RE = re.compile(r"^第\s?([0-9一二三四五六七八九十百零两]+)\s?
 def clean_title(name):
     if not name:
         return name
-    name = re.sub(r"[\(（]\s*[\w\-\.]+\.(?:sk|com|net|org)[^\)）]*[\)）]", "", name, flags=re.I)
+    name = re.sub(r"[\(（]\s*z-library.*?[\)）]", "", name, flags=re.I)
     name = re.sub(r"[\(（]\s*(1lib|z-lib).*?[\)）]", "", name, flags=re.I)
     name = name.replace("(", "（").replace(")", "）")
     name = re.sub(r"\s+", " ", name).strip(" -_·.")

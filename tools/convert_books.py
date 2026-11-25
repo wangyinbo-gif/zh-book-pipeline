@@ -15,7 +15,6 @@
     books/<书名>/assets/*.webp  裁出来的插图
     books/<书名>/report.json    质量报告
 """
-from paths import ROOT
 import os
 import re
 import sys

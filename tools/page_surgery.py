@@ -9,7 +9,7 @@ r"""书页手术工具：把「图注/图内标注/脚注/表格数字与正文�
 
 fixfile 结构：
     {
-      "book_dir": "<BOOKROOT>/books/<book-id>",   # 必填，书目录绝对路径
+      "book_dir": "{BOOKS}/某书",   # 必填，书目录绝对路径
       "apply": true,                          # false/缺省 = 只试算不写盘
       "regions": [
         {"page": 136,

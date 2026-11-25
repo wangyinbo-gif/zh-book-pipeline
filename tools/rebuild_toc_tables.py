@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """按各书真实目录重建章节（页码来自书前目录页 + 正文锚点/偏移）。"""
-from paths import BOOKS
 import json
+from paths import ROOT
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-BOOKS = BOOKS
+BOOKS = os.path.join(ROOT, "books")
 
 # (标题, PDF 起始页)
 TABLES = {

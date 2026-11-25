@@ -12,8 +12,8 @@
     .venv\\Scripts\\python.exe tools\\table_grid.py <书名> probe <页码...>
     .venv\\Scripts\\python.exe tools\\table_grid.py <书名> scan <起页> <止页>
 """
-from paths import BOOKS
 import io
+from paths import ROOT
 import json
 import os
 import re
@@ -27,7 +27,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pymupdf
 
-BOOKS = BOOKS
+BOOKS = os.path.join(ROOT, "books")
 HAN = re.compile(r"[\u4e00-\u9fff]")
 norm = lambda s: "".join(HAN.findall(s or ""))
 
@@ -299,7 +299,7 @@ def main():
     mode = sys.argv[2] if len(sys.argv) > 2 else "probe"
     d = resolve(sys.argv[1])
     lbp = load_cache(d)
-    pdf = os.path.join(os.path.join(ROOT, "inbox"), os.path.basename(d) + ".pdf")
+    pdf = os.path.join(ROOT, "需人工处理", os.path.basename(d) + ".pdf")
     if not os.path.exists(pdf):
         raise SystemExit("缺 PDF: " + pdf)
     doc = pymupdf.open(pdf)

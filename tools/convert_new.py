@@ -7,7 +7,6 @@
 
 输出到 books/，日志追加到 books/新书转换日志.txt。每本完成立即打印一行结果。
 """
-from paths import ROOT, BOOKS
 import argparse
 import concurrent.futures
 import os

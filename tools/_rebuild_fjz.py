@@ -13,13 +13,13 @@
  6 标题不按 block 猜，而是按书前目录（p5-6）的规范标题做"顺序匹配"，在 OCR 里找每个章/节标题的首次出现页
 
 用法：
-  python tools\\_rebuild_fjz.py scan [起页] [止页]     # 默认全书；写 _工作记录/古建史与全库审查/_rebuild_scan.json
+  python tools\\_rebuild_fjz.py scan [起页] [止页]     # 默认全书；写 _工作记录\古建史与全库审查\_rebuild_scan.json
   python tools\\_rebuild_fjz.py report                # 守恒/逐页对比
   python tools\\_rebuild_fjz.py apply --dry           # 只算不写
   python tools\\_rebuild_fjz.py apply                 # 写回 book.json（自动备份）
 """
-from paths import TOOLS
 import io
+from paths import ROOT
 import json
 import os
 import re
@@ -28,14 +28,14 @@ import sys
 import time
 from collections import Counter
 
-sys.path.insert(0, TOOLS)
-sys.path.insert(0, os.path.join(TOOLS, "..", "_工作记录", "古建史与全库审查"))
+sys.path.insert(0, os.path.join(ROOT, "tools"))
+sys.path.insert(0, os.path.join(ROOT, "_工作记录", "古建史与全库审查"))
 import common as C
 
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, TOOLS)
+sys.path.insert(0, os.path.join(ROOT, "tools"))
 import pdf2book as P
 
 REVIEW = C.REVIEW

@@ -5,8 +5,8 @@
 数据来源：books\\*\\book.json 的 stats/shelfCategory + 题库\\**\\*.json（同书取题数最多的一份）
 """
 
-from paths import ROOT
 import io, os, json, glob, re, time
+from paths import ROOT
 root = ROOT
 B = os.path.join(root,'books')
 # 题库：同 bookId 取题数最多的一份（正式版）

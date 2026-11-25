@@ -12,11 +12,11 @@
   - 段落切分：栏内按 y 排序，缩进（x0 > 栏基准 + 28）或大间距（>90px）起新段
   - 写回前校验：旧文本汉字多重集 99.5% 被新文本覆盖，否则该页回退
 """
-from paths import BOOKS
 import io, json, os, re, shutil, sys, time
+from paths import ROOT
 from collections import Counter
 
-BOOKS = BOOKS
+BOOKS = os.path.join(ROOT, 'books')
 HAN = re.compile(r'[\u4e00-\u9fff]')
 NUMROW = re.compile(r'^[0-9一二三四五六七八九十.．\s~～\-，,]+$', re.U)
 

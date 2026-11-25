@@ -20,7 +20,6 @@
   - 所有写盘均为「写 .tmp -> 校验 -> os.replace」原子替换
   - 失败返回非 0 退出码，便于串进脚本
 """
-from paths import ROOT, BOOKS
 import argparse, difflib, glob, json, os, re, shutil, sys, datetime
 import qbank_extra as QE
 

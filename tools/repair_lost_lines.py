@@ -18,7 +18,6 @@
 安全：改动前自动备份 book.json；应用后校验「新增字数 == 各片段字数之和」，
 不等则抛错不写盘；块数变化只影响该书，若该书有题库，需另跑 qbank 重定位锚点。
 """
-from paths import BOOKS
 import argparse
 import hashlib
 import io

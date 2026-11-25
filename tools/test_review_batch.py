@@ -29,8 +29,12 @@ def run_cli(*args):
 
 class ReviewBatchTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(prefix="review_batch_test_")
+        test_root = (Path(__file__).resolve().parent.parent / "_工作记录").resolve()
+        test_root.mkdir(parents=True, exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(prefix="review_batch_test_", dir=test_root)
         self.root = Path(self.temp.name).resolve()
+        if self.root.parent != test_root:
+            raise RuntimeError("测试目录不在指定工作区中")
         self.bookdir = self.root / "book"
         self.bookdir.mkdir()
         self.bookfile = self.bookdir / "book.json"

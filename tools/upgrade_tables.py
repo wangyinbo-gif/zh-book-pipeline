@@ -8,9 +8,10 @@
 得分 = 实填行数×2 - 空列数×3 - 碎列惩罚
 """
 import io, json, os, re, shutil, sys, time
+from paths import ROOT
 from collections import Counter
 
-d = os.path.join(BOOKS, "某书")
+d = os.path.join(ROOT, "books", "建筑物理（第三版） (柳孝图)")
 fp = os.path.join(d, "book.json")
 raw = lambda s: re.sub(r"\s", "", s or "")
 HAN = re.compile(r"[\u4e00-\u9fff]")

@@ -16,7 +16,6 @@
   7 zip（可选）：条目数、顶层目录、中文文件名的 UTF-8 标记、条目数与目录一致
 失败时退出码 1，并列出前若干条失败明细。
 """
-from paths import ROOT
 import argparse
 import json
 import os

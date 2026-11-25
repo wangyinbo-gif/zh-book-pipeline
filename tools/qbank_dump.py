@@ -13,7 +13,6 @@
 
 说明：这是通用版，不动题库/_dump.py（那本是《建筑概论》专用）。
 """
-from paths import ROOT
 import json, os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

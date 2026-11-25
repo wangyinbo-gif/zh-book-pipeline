@@ -12,8 +12,8 @@
     python tools\build_tables.py <书名> dry      # 只报告
     python tools\build_tables.py <书名> apply    # 写回（备份 + 守恒校验）
 """
-from paths import BOOKS
 import io
+from paths import ROOT
 import json
 import os
 import re
@@ -22,7 +22,7 @@ import sys
 import time
 from collections import Counter
 
-BOOKS = BOOKS
+BOOKS = os.path.join(ROOT, "books")
 HAN = re.compile(r"[\u4e00-\u9fff]")
 norm = lambda s: "".join(HAN.findall(s or ""))
 btxt = lambda x: x.get("text") or x.get("caption") or ""

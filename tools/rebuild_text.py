@@ -17,8 +17,8 @@
     python tools\rebuild_text.py <书名> report               # 守恒与规模统计
     python tools\rebuild_text.py <书名> apply                # 校验通过后写回（自动备份）
 """
-from paths import BOOKS
 import io
+from paths import ROOT
 import json
 import os
 import re
@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pdf2book as P
 import pypdfium2 as pdfium
 
-BOOKS = BOOKS
+BOOKS = os.path.join(ROOT, "books")
 HAN = re.compile(r"[\u4e00-\u9fff]")
 norm = lambda s: "".join(HAN.findall(s or ""))
 btxt = lambda x: x.get("text") or x.get("caption") or ""
@@ -272,13 +272,13 @@ def scan_page(pdfdoc, img_dir, p, lbp, hdr, titles=None):
 
 def find_pdf(book_dir):
     name = os.path.basename(book_dir)
-    for base in [os.path.join(ROOT, "inbox"), os.path.join(ROOT, "pending")]:
+    for base in [os.path.join(ROOT, "需人工处理"), os.path.join(ROOT, "待转换书籍")]:
         c = os.path.join(base, name + ".pdf")
         if os.path.exists(c):
             return c
     bk = json.load(io.open(os.path.join(book_dir, "book.json"), encoding="utf-8"))
     src = os.path.basename(bk.get("source") or "")
-    for base in [os.path.join(ROOT, "inbox"), os.path.join(ROOT, "pending")]:
+    for base in [os.path.join(ROOT, "需人工处理"), os.path.join(ROOT, "待转换书籍")]:
         c = os.path.join(base, src)
         if os.path.exists(c):
             return c

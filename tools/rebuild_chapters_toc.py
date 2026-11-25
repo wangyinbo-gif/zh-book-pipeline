@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """重建这几本书的目录（章首对齐到真正的标题块，标题清洗掉页码/索引噪声）。"""
-from paths import BOOKS
 import glob
+from paths import ROOT
 import json
 import os
 import re
@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-B = BOOKS
+B = os.path.join(ROOT, "books")
 CH = re.compile(r"^第\s*([0-9一二三四五六七八九十百零〇]{1,3})\s*章")
 DIG = {"零": 0, "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 norm = lambda t: re.sub(r"\s+", "", t or "")

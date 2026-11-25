@@ -9,9 +9,9 @@
     要真正推进，应改成「逐本逐页目视 + 只处理确认碎掉的页」，
     而不是继续打磨这个自动验收器。
 
-设计依据：转换器切块修复方案（内部文档）§4。
+设计依据：`交接文档\\流程\\转换器切块修复方案.md` §4。
   - 不重 OCR、不重裁图：图块与图片资源完全不动（不变式 I5）。
-  - 输出到 `reflow/<书名>/book.json`，**绝不写 books\\**。
+  - 输出到 `_工作记录\\reflow\\<书名>\\book.json`，**绝不写 books\\**。
   - 用途是验收：先看「如果修好会变成什么样」，确认后再改正式路径。
 
 与 pdf2book.parse_page 的关键差别（这三条就是 G1 要验的东西）：
@@ -53,7 +53,7 @@ from layout_parse import (  # noqa: E402
 )
 
 BOOKS = ROOT / "books"
-OUT_ROOT = ROOT / "reflow"
+OUT_ROOT = ROOT / "_工作记录" / "reflow"
 
 # ---- 与 pdf2book 对齐的常量（必须一致，否则页眉页脚剔除结果会漂移 → 破坏 I4）
 HEADER_RATIO = 0.075

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """统一书库书名/作者字段：书名 = 纯书名，author = 国籍 + 作者（无作者留空）。"""
-from paths import BOOKS
 import json
+from paths import ROOT
 import os
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-B = BOOKS
+B = os.path.join(ROOT, "books")
 
 # (目录名特征, 书名, 作者；作者为空表示原书未署，不加第二行)
 TABLE = [

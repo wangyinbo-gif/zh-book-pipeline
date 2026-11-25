@@ -15,7 +15,6 @@
 3. python.exe 直接写桌面会被 Windows「受控文件夹访问」拒绝（PermissionError）。
    现在自动退回工作区 _dist/，并打印一条 PowerShell 复制命令给你手工搬过去。
 """
-from paths import ROOT
 import argparse
 import datetime
 import hashlib

@@ -129,6 +129,8 @@ def page(title, content, note=False):
 
 def build_review_notes(output, *, routes=None):
     """Build one directory. With offline routes, link to exported book readers."""
+    if not SOURCE.is_dir():
+        return 0  # 复习笔记库（复习资料/）不存在：跳过，不影响离线包主体
     entries = json.loads((SOURCE / "目录.json").read_text(encoding="utf-8-sig"))
     rendered = {}
     cards = []

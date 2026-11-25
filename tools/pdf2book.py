@@ -77,11 +77,13 @@ def _pymupdf():
     return pymupdf
 
 
-def has_text_layer(pdf_path, sample=8, min_chars=120):
+def has_text_layer(pdf_path, sample=12, min_chars=120):
     """抽样检查 PDF 是否带「可用」文字层；电子版书籍可直接读文字，免 OCR。
 
     注意：有的扫描件带一层乱码文字（如 !!"#$%&），字符数够但内容不可读，
     这种必须走 OCR。所以除了字符数，还要看中文占比。
+    抽样策略（2026-11-25 A3 修复）：全书等距取 sample 页 + 页级多数决——
+    旧版只看前 8 页，卷首封面/版权/图版页会让带文字层的书误判为扫描件。
     """
     try:
         pymupdf = _pymupdf()
@@ -89,22 +91,22 @@ def has_text_layer(pdf_path, sample=8, min_chars=120):
         return False
     try:
         doc = pymupdf.open(pdf_path)
-        n = min(sample, doc.page_count)
+        n = doc.page_count
         if n == 0:
+            doc.close()
             return False
-        total, cjk, alpha = 0, 0, 0
-        for i in range(n):
+        if n <= sample:
+            idxs = list(range(n))
+        else:
+            idxs = sorted({round(i * (n - 1) / (sample - 1)) for i in range(sample)})
+        ok = 0
+        for i in idxs:
             t = doc.load_page(i).get_text("text").strip()
-            total += len(t)
-            cjk += sum(1 for ch in t if "\u4e00" <= ch <= "\u9fff")
-            alpha += sum(1 for ch in t if ch.isalpha() and ch.isascii())
+            cjk = sum(1 for ch in t if "\u4e00" <= ch <= "\u9fff")
+            if len(t) >= min_chars and cjk / max(1, len(t)) >= 0.05:
+                ok += 1
         doc.close()
-        if total / n < min_chars:
-            return False
-        # 中文占比过低（乱码文字层，字符数够但读不出内容）→ 判为无文字层，走 OCR
-        if total and cjk / total < 0.05:
-            return False
-        return True
+        return ok >= max(1, len(idxs) * 3 // 5)
     except Exception:
         return False
 

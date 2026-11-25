@@ -191,9 +191,36 @@ def chapters_ethnic(book_dir, pages):
 def chapters_generic(book_dir, pages):
     """通用章节识别（无「第N章」的书）：
     1) 页眉/正文里重复出现的「第N讲/第N篇/第N卷」→ 按编号取首次出现页
+    1b) 点校体卷系「卷第一 / 卷二 城东」（2026-11-25 A1 改1）：
+        纯标题资格过滤防正文引用行，同编号 ≥2 页命中取第 2 次（目录页必早于正文卷端）
     2) 上/中/下篇
-    3) 页面上部的竖排大字标题
+    3) 页面上部的竖排大字标题（A1 改3：对 book.json 图注池做负过滤，防图版说明行做假章）
     """
+    # 1b) 卷系点校体（先于「第N讲」尝试：伽蓝记/梦华录类只有 卷第X 形态）
+    vol_pat = re.compile(r"^卷\s*第?\s*([0-9一二三四五六七八九十]{1,3})\s*(.*)$")
+    SENT_END = "。；，！？“”\"'"
+    vol_hits = {}
+    for n in sorted(pages):
+        for ln in pages[n]:
+            t = (ln.get("text") or "").strip()
+            m = vol_pat.match(t)
+            if not m:
+                continue
+            rest = (m.group(2) or "").strip()
+            # 纯标题资格：剩余部分短且无句读（防「卷一“城内”之愿会寺…」引用行）
+            if len(rest) > 12 or any(ch in SENT_END for ch in rest):
+                continue
+            vol_hits.setdefault(m.group(1), []).append((t[:30], n))
+    if len(vol_hits) >= 2:
+        out = [hits[1] if len(hits) >= 2 else hits[0] for hits in vol_hits.values()]
+        out.sort(key=lambda x: x[1])
+        res = []
+        for t, p in out:
+            if res and p - res[-1][1] < 2:   # 多卷挤同一目录页 → 判为目录命中，不采信
+                continue
+            res.append((t, p))
+        if len(res) >= 2:
+            return res
     pat = re.compile(r"^第\s*([一二三四五六七八九十]+)\s*([讲篇卷])")
     first = {}
     for n in sorted(pages):
@@ -231,12 +258,33 @@ def chapters_generic(book_dir, pages):
                 break
     if len(res) >= 2:
         return res
-    # 竖排大字
+    # 竖排大字（A1 改3：图注池负过滤——图版说明行的竖排字列不是章题）
+    cap_pool = set()
+    bj = os.path.join(book_dir, "book.json")
+    if os.path.isfile(bj):
+        try:
+            bk = json.load(open(bj, encoding="utf-8-sig"))
+            for b in bk.get("blocks") or []:
+                if b.get("type") == "heading":
+                    continue   # 真章题本会成 heading，不算吞并行
+                s = norm(b.get("text") or b.get("caption") or "")
+                if b.get("type") != "table" and len(s) >= 4:
+                    cap_pool.add(s)
+        except Exception:
+            pass
+
+    def swallowed(s):
+        # 候选竖排大字与某正文块文本相同/被其吞并 → 熔掉的说明行，非独立章题
+        k = norm(s)
+        if not k or len(k) < 4:
+            return False
+        return any(k == bt or (len(bt) > len(k) and k in bt) for bt in cap_pool)
+
     vt = vertical_titles(pages, min_h=120, ratio=2.2)
     out = []
     for n in sorted(vt):
         for t in vt[n]:
-            if len(t) >= 4:
+            if len(t) >= 4 and not swallowed(t):
                 out.append((t, n))
                 break
     res = []

@@ -36,28 +36,27 @@ def line_kind(line):
 
 
 def render_list(lines, ordered=False):
-    """Render one list, keeping a single level of indented sub-items."""
+    """Render one list, keeping indented sub-items at any depth."""
     tag = "ol" if ordered else "ul"
     items = [(line_indent(line), line.lstrip(" ").split(" ", 1)[1]) for line in lines]
-    html, i = [], 0
-    while i < len(items):
-        indent, text = items[i]
-        if indent == 0:
-            children, j = [], i + 1
-            while j < len(items) and items[j][0] > 0:
-                children.append(items[j][1])
-                j += 1
-            nested = "".join(f"<li>{inline(child)}</li>" for child in children)
-            html.append(
-                f"<li>{inline(text)}<ul>{nested}</ul></li>"
-                if nested
-                else f"<li>{inline(text)}</li>"
-            )
+    # 缩进量归一成连续的层号：2 空格、4 空格、6 空格…都行，跳级也不出错
+    rank = {d: k for k, d in enumerate(sorted({d for d, _ in items}))}
+    items = [(rank[d], text) for d, text in items]
+
+    def build(start, depth):
+        out, i = [], start
+        while i < len(items) and items[i][0] >= depth:
+            text = items[i][1]
+            j = i + 1
+            inner = ""
+            if j < len(items) and items[j][0] > depth:
+                sub, j = build(j, depth + 1)
+                inner = f"<ul>{sub}</ul>"
+            out.append(f"<li>{inline(text)}{inner}</li>")
             i = j
-        else:
-            html.append(f"<li>{inline(text)}</li>")
-            i += 1
-    return f"<{tag}>{''.join(html)}</{tag}>"
+        return "".join(out), i
+
+    return f"<{tag}>{build(0, 0)[0]}</{tag}>"
 
 
 def render_table(lines):

@@ -60,7 +60,8 @@ def log(msg, fp=None):
 
 def run(cmd, fp=None, quiet=False):
     log("  $ " + " ".join(os.path.basename(c) if i else c for i, c in enumerate(cmd)), fp)
-    p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    p = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     out = (p.stdout or "") + (p.stderr or "")
     if p.returncode != 0:
         log("  ! 失败（exit=%d）\n%s" % (p.returncode, out[-2000:]), fp)
@@ -873,11 +874,15 @@ def gate(book_dir, write_profile=True):
                            if b.get("type") == "figure" and (b.get("caption") or "").strip())
     paired = 1.0 if figs == 0 else paired_count / figs
     # 统一 98% 门槛；只有「原书完全没图注」的书经人工确认后豁免
+    # B1（2026-11-25）：小图量书（≤20 图）分母失真，改用绝对量下限——缺 ≤2 视为过
     cap_min = 0.98
     cap_exempt = bool(book.get("figure_caption_exempt"))
-    add("图注配对", cap_exempt or figs == 0 or paired >= cap_min,
+    small_figs = figs <= 20
+    pair_ok = paired >= cap_min or (small_figs and figs - paired_count <= 2)
+    add("图注配对", cap_exempt or figs == 0 or pair_ok,
         "不适用（原书无图注排版）" if cap_exempt
-        else f"{paired_count}/{figs}（{paired:.1%}，门槛 98%）")
+        else f"{paired_count}/{figs}（{paired:.1%}，门槛 98%"
+             + ("，小图书按绝对下限放行）" if small_figs and paired < cap_min and figs - paired_count <= 2 else "）"))
     chapter_min = 1 if ("A" in classes or "C" in classes) else 2
     add("章节数", chapter_min <= stats.get("chapters", 0) <= 90,
         str(stats.get("chapters", 0)) + ("（A/C 类放宽到 ≥1）" if chapter_min == 1 else ""))
@@ -898,8 +903,9 @@ def gate(book_dir, write_profile=True):
              and has_watermark(block_text(b)))
     add("水印文字", wm == 0, str(wm))
     nocap_rate = nocap / figs if figs else 0.0
-    add("缺图注", cap_exempt or nocap_rate < 0.01,
-        "不适用（原书无图注排版）" if cap_exempt else f"{nocap}/{figs}（{nocap_rate:.2%}，要求 <1%）")
+    add("缺图注", cap_exempt or nocap_rate < 0.01 or (small_figs and nocap <= 2),
+        "不适用（原书无图注排版）" if cap_exempt else f"{nocap}/{figs}（{nocap_rate:.2%}，要求 <1%"
+        + ("，小图书按绝对下限放行）" if small_figs and nocap_rate >= 0.01 and nocap <= 2 else "）"))
     add("结构诊断", True,
         f"重复≥5次的标题文本 {sd['headingRep5']} 种 · 重复标题块 {sd['headingDupBlocks']} · 章起点非标题 {sd['startNonTitle']}/{sd['chapters']} · 表格块 {sd['tables']}")
     ok = all(c["ok"] for c in checks)

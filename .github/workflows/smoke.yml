@@ -1,4 +1,4 @@
-name: smoke
+﻿name: smoke
 
 on:
   push:
@@ -42,5 +42,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: 服务端安全回归 R1-R6（413/400/403/401）
+      - name: 服务端安全回归 R1-R7（413/400/403/401 + 路径边界）
         run: node tools/test_server_security.js

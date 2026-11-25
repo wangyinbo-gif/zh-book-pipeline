@@ -30,7 +30,6 @@ def run_cli(*args):
 class ReviewBatchTests(unittest.TestCase):
     def setUp(self):
         test_root = (Path(__file__).resolve().parent.parent / "_工作记录").resolve()
-        test_root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(prefix="review_batch_test_", dir=test_root)
         self.root = Path(self.temp.name).resolve()
         if self.root.parent != test_root:

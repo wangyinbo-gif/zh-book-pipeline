@@ -1426,7 +1426,11 @@ def main():
     rc.set_defaults(func=cmd_recheck)
 
     args = ap.parse_args()
-    return args.func(args) or 0
+    r = args.func(args)
+    # bool 语义（one/post 等返回 True/False）→ 0/1；int 语义（batch 的 0/2）原样透传
+    if isinstance(r, bool):
+        return 0 if r else 1
+    return r or 0
 
 
 if __name__ == "__main__":

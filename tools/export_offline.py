@@ -10,7 +10,8 @@
     python tools/export_offline.py --zip           # 导出后顺带打 zip（含 .sha256.txt）
 
 结构：index.html（书架）+ reader-<hash>.html（每本一个）+ practice-<hash>.html（每个题库一个）
-      + data/routes.js + data/books.js + offline-api.js + books/<hash>/assets/ + 使用说明.txt
+      + review/（复习笔记）+ data/routes.js + data/books.js + offline-api.js
+      + books/<hash>/assets/ + 使用说明.txt
 """
 import argparse
 import hashlib
@@ -21,6 +22,11 @@ import shutil
 import sys
 import time
 import zipfile
+
+if __package__:
+    from .build_review_notes import build_review_notes
+else:
+    from build_review_notes import build_review_notes
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BOOKS = os.path.join(ROOT, 'books')
@@ -233,6 +239,7 @@ def make_readme(book_count, banks, exported_at, total_files, total_bytes):
 1. 解压整个文件夹（不要只把 index.html 单独拖出来，书架、书、图都靠同目录的其它文件）。
 2. 双击 index.html，浏览器打开书架。
 3. 点一本书开始读；有题库的书，顶栏会出现「刷题」按钮。
+4. 在书架筛选栏点「复习笔记」，可按书目阅读整理好的笔记。
 
 需要装什么
 - 什么都不用装：不需要 Node、不需要 Python、不需要联网。
@@ -420,6 +427,7 @@ def build(out_dir, copy=False, dry_run=False, no_assets=False):
             shutil.copy2(src, os.path.join(tmp, fn))
 
         write_text(os.path.join(tmp, 'index.html'), render_index(read_text(os.path.join(PUBLIC, 'index.html'))))
+        review_count = build_review_notes(os.path.join(tmp, 'review'), routes=routes)
 
         asset_files = 0
         asset_bytes = 0
@@ -472,6 +480,7 @@ def build(out_dir, copy=False, dry_run=False, no_assets=False):
             'exportedAt': exported_at,
             'books': len(books),
             'qbanks': len(banks),
+            'reviewNotes': review_count,
             'readerPages': len(books),
             'practicePages': len(banks),
             'bankTotals': [{'bookTitle': b['bookTitle'], 'author': b.get('author') or '',

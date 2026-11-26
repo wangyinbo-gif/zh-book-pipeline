@@ -22,6 +22,7 @@
 每个阶段在书目录写 .pipeline.json 记录进度；改参数（--scale）会重跑 convert 之后的阶段。
 """
 import argparse
+from paths import ROOT
 import concurrent.futures
 import difflib
 import glob
@@ -935,7 +936,7 @@ def gate(book_dir, write_profile=True):
     # 统一 98% 门槛；只有「原书完全没图注」的书经人工确认后豁免
     # B1（2026-11-25）：小图量书（≤20 图）分母失真，改用绝对量下限——缺 ≤2 视为过
     # B3（2026-11-25 A1）：整页书影页（整页单图 ≥80% 且正文无「图」字）自动豁免，
-    #   替代逐本人手 figure_caption_exempt 标记（陶庵梦忆 44 张整页书影即为该类）
+    #   替代逐本人手 figure_caption_exempt 标记（整页书影多的竖排书即为该类）
     cap_min = 0.98
     auto_exempt = bool(bm["figs"] and bm["lonely_share"] >= 0.8 and bm["body_tu"] == 0)
     cap_exempt = bool(book.get("figure_caption_exempt")) or auto_exempt

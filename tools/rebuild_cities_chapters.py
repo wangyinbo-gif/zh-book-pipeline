@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-BOOK = "books/明日之城 1880年以来城市规划与设计的思想史(第四版) (彼得·霍尔) (z-library.sk, 1lib.sk, z-lib.sk)"
+BOOK = "books/某城市规划思想史（扫描书目录名略）"
 
 # 目录页读到：章号、章名、印刷页码（偏移量稍后用正文小节标题校验）
 CHAPTERS = [

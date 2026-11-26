@@ -19,7 +19,7 @@
 
 ## 三态质检
 
-1. **程序绿灯**：`gate` / `textcheck` / `proofread` / `coverage` / `structure` 全过（机器可判定）
+1. **程序绿灯**：`gate`（12 项门槛）/ `textcheck` / `proofread` / `coverage` / `structure` 全过（机器可判定）
 2. **逐页机器对照**：OCR 文本 vs 书稿文本，按页算覆盖率与偏移，抓「整页丢文 / 整段串行」
 3. **逐页人工目视**：只有第 ③ 层算「深审」；程序绿不等于内容对
 
@@ -39,6 +39,8 @@ tools/                 全部流水线脚本（核心入口 pipeline.py）
   figgap.py            图版缺口报告（OCR 图注/正文引用/页内图块 + PDF 视觉证据）
   figure_audit.py      图版审计：原页检出图 vs 书稿裁图，逐图覆盖对照
   figure_asset_boxes.py 旧资产在原页的定位（多尺度对位 + 低置信留证）
+  vertical_ocr.py      竖排单页识别（列槽投影 + 直立横拼 rec + 页级去倾斜）
+  vertical_book.py     竖排整本 → book.json（成段 / 卷章 / 页级闸 / 页级缓存）
   layout_parse.py      版式解析：栏位判定 / 行归栏 / 组装不变量
   reflow_book.py       实验性重排验收（只读 OCR + book.json，输出不写回 books/）
   export_offline.py    导出离线静态版
@@ -47,7 +49,7 @@ tools/                 全部流水线脚本（核心入口 pipeline.py）
 public/                零依赖 Web 阅读器与练习页（Node server.js，端口 4590）
 server.js              本地书库服务（零第三方依赖）
 samples/demo-book/     自制 3 页示例样书（无版权内容）
-docs/                  架构、质检、硬规矩、数据说明
+docs/                  架构、质检、硬规矩、数据、安全、竖排识别、公版样本方法
 ```
 
 ## 快速开始
@@ -62,6 +64,10 @@ export BOOKROOT=/path/to/library        # Windows: set BOOKROOT=D:\library
 
 # 转换一本（PDF 放 inbox/）
 python tools/pipeline.py one "inbox/some-book.pdf"
+
+# 竖排右起扫描本（另走竖排分支，横排流程不受影响）
+export VERTICAL_OCR_MODEL=models/ch_PP-OCRv5_rec_mobile.onnx
+python tools/pipeline.py one "inbox/vertical-scan.pdf" --vertical --title some-book
 
 # 已有书稿重跑后处理与质检
 python tools/pipeline.py post "books/some-book"
@@ -85,10 +91,24 @@ node server.js        # http://127.0.0.1:4590
 
 ## 状态与限制
 
-- 主要针对**中文竖排/横排扫描书**调校，OCR 依赖 RapidOCR（onnxruntime，CPU 可跑）。
+- 主要针对**中文横排与竖排扫描书**调校，OCR 依赖 RapidOCR（onnxruntime，CPU 可跑）；
+  竖排走独立分支（投影分列 + 字形直立横拼 rec，不用检测框），路线与页级去倾斜见
+  [docs/VERTICAL-OCR.md](docs/VERTICAL-OCR.md)。
 - 版面极端复杂（多栏、表格套图、双页跨版）需要人工介入；工具提供裁图/对照/回退辅助，不保证全自动。候选召回与诊断各自独立验证，不自动删块。
-- 仓库内脚本是实盘工具，部分为单书一次性脚本（文件名含书名或页面范围），按需修改后使用。
+- 仓库内脚本是实盘工具，部分为单书一次性脚本（页面范围、正则阈值按你的书库重标），按需修改后使用。
+- 公版原文样本的剥离 / 抽样 / 出口复验方法见 [docs/PUBLIC-SAMPLING.md](docs/PUBLIC-SAMPLING.md)；
+  本仓库不含任何书籍正文，也不含逐本书目配置台账。
 - 对外展示只使用已深审的书（28 本仅程序绿灯的书未做逐页人工目视，不作展示依据）。
+
+## 版本
+
+发布走 git tag + GitHub Release，tag 说明即摘要（完整历史见 [Releases](../../releases)）。
+
+| tag | 日期 | 摘要 |
+|---|---|---|
+| `v1.0.6` | 2026-11-26 | 竖排分支投产：`--vertical` 入口 + 页级去倾斜（±3° 投影方差找角、2× 谐波回退、变体缓存键）+ 竖排页级闸；单测 30 项；`recheck` 报告 gate 项数改按实际 12 项渲染 |
+| `v1.0.5` | 2026-11-25 | 安全 P0-01：路径边界改 `path.relative` + `realpath`，四路由统一 `resolveInside`；回归 31 例 |
+| `v1.0.4` | 2026-11-25 | 古籍卷系三形态识别 + 熔段图注提取 + gate「卷序连续」护栏 |
 
 ## License
 

@@ -4,6 +4,8 @@
 
 ```
 PDF ──convert──> pages/*_ocr2.json + assets/*.webp + book_raw.json
+     │
+     └──one --vertical──> book.json（竖排右起扫描本：跳过横排后处理，详见 VERTICAL-OCR.md）
                       │
                       ├─bookfix────> 书名清理、目录页剔除、章节重建
                       ├─postfix────> 跨页/跨插图续段合并、图注归一
@@ -17,7 +19,9 @@ book.json ──recheck/coverage/structure/realign──> 质检报告
 book.json + 题库 ──export_offline──> _dist/（离线静态版，双击可用）
 ```
 
-每个阶段把进度写进书目录的 `.pipeline.json`；改 OCR 参数（`--scale`）会重跑 convert 之后的阶段。
+横排走 `convert → bookfix → postfix → readability → toc → dims → proofread → preview`；
+竖排只走 `convert`（成段/卷章/页级闸由 `tools/vertical_book.py` 内建），两者共用同一份 `book.json` schema。
+每个阶段把进度写进书目录的 `.pipeline.json`（`layout` 字段记 `vertical`/`horizontal`）；改 OCR 参数（`--scale`）会重跑 convert 之后的阶段。
 `book_raw.json` 是 OCR 后的原始快照，重做后处理时从它重建，保证可重复。
 
 ## 目录约定
@@ -71,6 +75,9 @@ book.json + 题库 ──export_offline──> _dist/（离线静态版，双击
 | `table` | 表格 | `rows`（二维数组）、`caption` |
 | `note` | 脚注/表注 | `text`、`page`（紧跟所在段落之后） |
 | `caption` | 独立图注块（仅在图注无法并入 figure 时使用） | `text`、`page` |
+
+竖排产物同样落在这些块类型上：`heading` = 卷端/篇名行，`note` = 卷首页篇目列表，
+跨页续段用 `pages`；额外的页级诊断写 `.ocr_cache/` 与 `竖排质检.json`，不进 `book.json`。
 
 `caption` 也可作为 figure 的字段；`captionDisplay=false` 表示该图原页无印刷图注（豁免计数，**不得滥用**）。
 

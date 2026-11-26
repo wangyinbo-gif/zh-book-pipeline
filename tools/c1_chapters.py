@@ -47,10 +47,19 @@ def norm(s):
 
 def load_pages(book_dir):
     out = {}
-    for f in glob.glob(os.path.join(book_dir, "pages", "page_*_ocr2.json")):
-        n = int(re.search(r"page_(\d+)", f).group(1))
+    # 用 os.listdir 而非 glob：书稿目录名常含 []（如「（[宋]某某 撰…）」），glob 会把 [] 当通配符 → 0 页
+    pdir = os.path.join(book_dir, "pages")
+    try:
+        names = os.listdir(pdir)
+    except OSError:
+        return out
+    for name in names:
+        m = re.fullmatch(r"page_(\d+)_ocr2\.json", name)
+        if not m:
+            continue
+        n = int(m.group(1))
         try:
-            out[n] = json.load(open(f, encoding="utf-8"))
+            out[n] = json.load(open(os.path.join(pdir, name), encoding="utf-8"))
         except Exception:
             out[n] = []
     return out

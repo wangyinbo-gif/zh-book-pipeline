@@ -119,6 +119,22 @@ def convert(pdf, book_dir, title, book_name, scale, fp):
     return run(cmd, fp)
 
 
+def convert_vertical(pdf, book_dir, title, book_name, scale, fp, ears="", model=""):
+    """竖排分支：tools/vertical_book.py（右→左成文 + 卷章 + 页级闸 + 页级缓存）。
+
+    与横排 convert 完全并列、互不影响；不跑 pdf2book，也不依赖内嵌文字层
+    （文字层字序乱的竖排扫描书由调用方直接走本分支）。
+    """
+    display = (title or book_name).strip() or book_name
+    cmd = [PY, os.path.join(TOOLS, "vertical_book.py"), "--pdf", pdf, "--out", book_dir,
+           "--title", display, "--book", display, "--scale", str(scale)]
+    if ears:
+        cmd += ["--ear", ears]
+    if model:
+        cmd += ["--model", model]
+    return run(cmd, fp)
+
+
 def post_stage(stage, book_dir, fp):
     scripts = {
         "bookfix": ("bookfix.py", ["book.json"]),
@@ -728,7 +744,7 @@ def render_recheck(data):
     cov = data["coverage"] or {}
     lines.append("- 复查时间：%s" % data["checkedAt"])
     lines.append("- 说明：%s" % data.get("note", "自动复查记录"))
-    lines.append("- gate：%s" % ("✅ 7 项门槛全过" if g["ok"] else "❌ 有未通过项（见下表）"))
+    lines.append("- gate：%s" % (("✅ %d 项门槛全过" % len(g["checks"])) if g["ok"] else "❌ 有未通过项（见下表）"))
     lines.append("")
     lines.append("| 检查项 | 结果 | 数值 |")
     lines.append("| --- | --- | --- |")
@@ -1024,7 +1040,7 @@ def write_report(book_dir, info, checks, ok, seconds):
     lines.append(f"# 转换报告 · {book.get('bookTitle') or os.path.basename(book_dir)}")
     lines.append("")
     lines.append(f"- 源文件：{info.get('pdf')}")
-    lines.append(f"- 转换模式：{'文字层直读（免 OCR）' if info.get('mode') == 'text' else 'OCR 识别'}")
+    lines.append(f"- 转换模式：{'文字层直读（免 OCR）' if info.get('mode') == 'text' else ('OCR 识别（竖排右起）' if info.get('mode') == 'vertical' else 'OCR 识别')}")
     lines.append(f"- 页数：{stats.get('pages')} 页｜正文：{stats.get('chars')} 字｜段落：{stats.get('paragraphs')}")
     lines.append(f"- 插图：{stats.get('figures')} 幅（图注配对 {stats.get('paired')}）")
     lines.append(f"- 章节：{stats.get('chapters')} 章")
@@ -1209,33 +1225,40 @@ def process_one(pdf, out_dir, args, fp):
     pf = preflight(pdf)
     write_json(os.path.join(book_dir, "预检.json"), pf)
     if not os.path.exists(os.path.join(book_dir, "book.json")) and not args.force:
-        q = probe_quality(pdf)
-        log("  [试读] 平均 %s 字/页 · 图注线索 %s · 章标题线索 %s" % (q.get("avgChars"), q.get("captions"), q.get("headings")), fp)
-        if q.get("skip"):
-            log("  ! 提前跳过：%s" % q["reason"], fp)
-            record_problem(out_dir, pdf, book_name, "提前跳过（试读不合格）", q["reason"])
-            quarantine_pdf(pdf, out_dir)
-            return False
+        if getattr(args, "vertical", False):
+            log("  [试读] 竖排分支：跳过横排试读（竖排不适用 det 框/双栏判据）", fp)
+        else:
+            q = probe_quality(pdf)
+            log("  [试读] 平均 %s 字/页 · 图注线索 %s · 章标题线索 %s" % (q.get("avgChars"), q.get("captions"), q.get("headings")), fp)
+            if q.get("skip"):
+                log("  ! 提前跳过：%s" % q["reason"], fp)
+                record_problem(out_dir, pdf, book_name, "提前跳过（试读不合格）", q["reason"])
+                quarantine_pdf(pdf, out_dir)
+                return False
     log("  [预检] %s 页 · %s · %s · 预计 %s 分钟%s" % (
         pf["pages"], pf["size"], "电子版（有文字层）" if pf["textLayer"] else "扫描件（OCR）",
         pf["etaMinutes"], (" · " + pf["warn"]) if pf["warn"] else ""), fp)
 
-    stages = ["convert"] + POST_STAGES
-    if args.from_stage in POST_STAGES:
-        stages = POST_STAGES[POST_STAGES.index(args.from_stage):]
-        stages = ["convert"] + stages if marker.get("done", {}).get("convert") is None and args.from_stage == "convert" else stages
-    if args.from_stage and args.from_stage not in stages:
-        stages = [args.from_stage] + POST_STAGES[POST_STAGES.index(args.from_stage):] if args.from_stage in POST_STAGES else ["convert"] + POST_STAGES
+    vertical = bool(getattr(args, "vertical", False))
+    stages = ["convert"] if vertical else (["convert"] + POST_STAGES)
+    if not vertical:
+        if args.from_stage in POST_STAGES:
+            stages = POST_STAGES[POST_STAGES.index(args.from_stage):]
+            stages = ["convert"] + stages if marker.get("done", {}).get("convert") is None and args.from_stage == "convert" else stages
+        if args.from_stage and args.from_stage not in stages:
+            stages = [args.from_stage] + POST_STAGES[POST_STAGES.index(args.from_stage):] if args.from_stage in POST_STAGES else ["convert"] + POST_STAGES
+    elif args.from_stage:
+        log("  ! 竖排分支只跑 convert（后处理由 vertical_book 内建完成），忽略 --from-stage", fp)
 
     try:
-        return _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages)
+        return _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages, vertical=vertical)
     except Exception as e:
         log("  ! 异常：%s" % e, fp)
         record_problem(out_dir, pdf, book_name, "转换异常", str(e))
         return False
 
 
-def _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages):
+def _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages, vertical=False):
     t0 = time.time()
     marker_path = os.path.join(book_dir, MARKER)
     marker = read_json(marker_path, {}) or {}
@@ -1245,21 +1268,31 @@ def _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages):
             # --force：章节数达标但形态可疑（如卷序断档）的书稿，强制重建（2026-11-25 坑1 回归配套）
             log("  - chapters2: 章节数正常，跳过", fp)
             done[st] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "seconds": 0}
-            marker = {"version": 1, "pdf": pdf, "scale": args.scale, "done": done}
+            marker = {"version": 1, "pdf": pdf, "scale": args.scale,
+                          "layout": "vertical" if vertical else "horizontal", "done": done}
             write_json(marker_path, marker)
             continue
         if st == "headertoc" and not need_header_toc(book_dir):
             log("  - headertoc: 目录结构正常，跳过", fp)
             done[st] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "seconds": 0}
-            marker = {"version": 1, "pdf": pdf, "scale": args.scale, "done": done}
+            marker = {"version": 1, "pdf": pdf, "scale": args.scale,
+                          "layout": "vertical" if vertical else "horizontal", "done": done}
             write_json(marker_path, marker)
             continue
         if done.get(st) and not args.force:
             log(f"  - {st}: 已完成，跳过", fp)
             continue
         t = time.time()
+
+        def do_convert():
+            if vertical:
+                return convert_vertical(pdf, book_dir, getattr(args, "title", "") or "", book_name,
+                                        args.scale, fp, ears=getattr(args, "ear", "") or "",
+                                        model=getattr(args, "vmodel", "") or "")
+            return convert(pdf, book_dir, getattr(args, "title", "") or "", book_name, args.scale, fp)
+
         if st == "convert":
-            code, _ = convert(pdf, book_dir, getattr(args, "title", "") or "", book_name, args.scale, fp)
+            code, _ = do_convert()
         else:
             code, _ = post_stage(st, book_dir, fp)
         if code != 0:
@@ -1267,7 +1300,7 @@ def _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages):
                 # 偶发启动卡死（Windows 上启动器未拉起子进程）：等待后重试一次
                 log("  ! convert 失败，20 秒后自动重试一次", fp)
                 time.sleep(20)
-                code, _ = convert(pdf, book_dir, getattr(args, "title", "") or "", book_name, args.scale, fp)
+                code, _ = do_convert()
             if st == "convert" and code != 0:
                 log("  ! convert 重试仍失败，终止本书", fp)
                 return False
@@ -1287,7 +1320,8 @@ def _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages):
                 record_problem(out_dir, pdf, book_name, "正文过少（可能倒置/空白扫描）", "chars<1000")
                 return False
         done[st] = {"at": time.strftime("%Y-%m-%d %H:%M:%S"), "seconds": round(time.time() - t, 1)}
-        marker = {"version": 1, "pdf": pdf, "scale": args.scale, "done": done}
+        marker = {"version": 1, "pdf": pdf, "scale": args.scale,
+                          "layout": "vertical" if vertical else "horizontal", "done": done}
         write_json(marker_path, marker)
 
     kept_ok, kept_detail = check_text_kept(book_dir)
@@ -1298,6 +1332,8 @@ def _run_stages(pdf, out_dir, book_dir, book_name, args, fp, stages):
         return False
 
     mode = marker.get("mode") or ("text" if read_json(os.path.join(book_dir, "pages", "page_001_text.json")) else "ocr")
+    if vertical:
+        mode = "vertical"
     seconds = time.time() - t0
     ok, checks = gate(book_dir)
     write_report(book_dir, {"pdf": pdf, "mode": mode}, checks, ok, seconds)
@@ -1361,6 +1397,11 @@ def cmd_batch(args):
 
 def cmd_post(args):
     book_dir = args.bookdir
+    _bk = read_json(os.path.join(book_dir, "book.json"), {}) or {}
+    if ((_bk.get("layout") or {}).get("direction") == "vertical"):
+        print("  - 竖排书稿：convert 阶段已内建成段/卷章/页级闸，横排后处理阶段不适用，跳过。")
+        print("    复查请用：python tools/pipeline.py recheck \"%s\"" % book_dir)
+        return 0
     fp = None
     ok = True
     if restore_raw(book_dir):
@@ -1495,6 +1536,10 @@ def main():
     one.add_argument("--scale", type=float, default=3.0)
     one.add_argument("--force", action="store_true")
     one.add_argument("--from-stage", default="", choices=[""] + ALL_STAGES)
+    one.add_argument("--vertical", action="store_true",
+                     help="竖排右起扫描件：走 tools/vertical_book.py（忽略文字层，不跑横排后处理）")
+    one.add_argument("--ear", default="", help="竖排书耳/版心书名，逗号分隔（默认取书名）")
+    one.add_argument("--vmodel", default="", help="竖排 rec 模型 onnx（默认 tools/models/）")
     one.set_defaults(func=cmd_one)
 
     batch = sub.add_parser("batch", help="转换整个文件夹")
@@ -1504,6 +1549,9 @@ def main():
     batch.add_argument("--workers", type=int, default=1)
     batch.add_argument("--force", action="store_true")
     batch.add_argument("--from-stage", default="", choices=[""] + ALL_STAGES)
+    batch.add_argument("--vertical", action="store_true", help="竖排右起扫描件（同 one --vertical）")
+    batch.add_argument("--ear", default="", help="竖排书耳/版心书名，逗号分隔")
+    batch.add_argument("--vmodel", default="", help="竖排 rec 模型 onnx")
     batch.set_defaults(func=cmd_batch)
 
     post = sub.add_parser("post", help="只重跑后处理（不重新 OCR）")

@@ -10,6 +10,8 @@
 - 来源：PaddleOCR PP-OCRv5（server 版 84MB 未入库，需要更高精度时另行下载）
 - 加载方式（RapidOCR 1.4.4，词典由 onnx metadata `character` 自带，36,775 字符，无需外部 keys 文件）：
 
+模型放置：仓库根 `models/` 与 `tools/models/` 二者皆可——pipeline/vertical 默认自动搜索（先根后 tools），`VERTICAL_OCR_MODEL` 或 `--vmodel` 可显式覆盖。
+
 ```python
 from rapidocr_onnxruntime import RapidOCR
 engine = RapidOCR(rec_model_path="models/ch_PP-OCRv5_rec_mobile.onnx")

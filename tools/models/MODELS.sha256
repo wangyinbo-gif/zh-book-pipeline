@@ -1,0 +1,6 @@
+# MODELS.sha256 — 模型指纹清单（P2-01 依赖锁定配套）
+# 生成时间：2026-11-26 · 生成方式：hashlib.sha256 流式计算（python tools/e2e_check.py --verify-models 可复核）
+# 格式：<sha256>  <空格两格> <绝对路径或 site-packages 相对说明>
+d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9  site-packages/ch_PP-OCRv4_det_infer.onnx  # rapidocr-onnxruntime 1.4.4 自带 det
+48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b  site-packages/ch_PP-OCRv4_rec_infer.onnx  # rapidocr-onnxruntime 自带 rec
+e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c  site-packages/ch_ppocr_mobile_v2.0_cls_infer.onnx  # rapidocr-onnxruntime 自带 cls 方向分类

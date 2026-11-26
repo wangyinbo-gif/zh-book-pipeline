@@ -1,0 +1,87 @@
+# e2e.yml —— 真实 PDF 端到端 CI（P1-02 + P2-01）
+# 前提（lead 同步公仓）：
+#   1) requirements-ci.txt（仓根）
+#   2) tools/e2e_check.py、tools/run_info.py、tools/test_e2e_check_units.py、tools/test_run_info.py
+#   3) tools/models/MODELS.sha256
+#   4) _工作记录/工程V1.2_20261126/e2e_assets/gen_fixtures.py（PDF 在 runner 现渲染，仓内不存二进制）
+#   5) models/ch_PP-OCRv5_rec_mobile.onnx（已在仓根 models/，vertical_ocr 自动按 仓根 models/ → tools/models/ 解析）
+# 超时预算：本地实测全链路 <1 分钟（横排 26s + 竖排 7s + 渲染/断言），12 分钟封顶富余。
+name: e2e-real-pdf
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - tools/pipeline.py
+      - tools/vertical_ocr.py
+      - tools/vertical_book.py
+      - tools/pdf2book.py          # 横排 convert 实际入口（任务清单外补充，理由见上）
+      - tools/convert*
+      - tools/bookfix.py
+      - tools/e2e_check.py
+      - tools/run_info.py
+      - requirements-ci.txt
+      - models/ch_PP-OCRv5_rec_mobile.onnx
+      - tests/e2e/**
+  schedule:
+    - cron: "30 18 * * 5"          # 每周五 18:30 UTC ≈ 周六 02:30 北京时间
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依赖锁定安装（--no-deps：闭包已全量锁定，防 rapidocr 拉桌面版 opencv 顶掉 headless）
+        run: |
+          python -m pip install --no-deps -r requirements-ci.txt
+          python -c "import PIL, numpy, fitz, pdfium, cv2, rapidocr_onnxruntime, onnxruntime; print('deps ok')"
+
+      - name: 模型 SHA-256 复核（tools/models/MODELS.sha256）
+        run: python tools/e2e_check.py --verify-models
+
+      - name: 端到端检查（横排 6 页 + 竖排 4 页；CI 一律关缓存）
+        env:
+          ZB_E2E_NO_CACHE: "1"
+        run: python tools/e2e_check.py
+
+      - name: 失败阶段定位说明
+        if: failure()
+        run: |
+          {
+            echo "## e2e 退出码表"
+            echo "| 码 | 阶段 | 含义 |"
+            echo "| -- | ---- | ---- |"
+            echo "| 20 | 渲染 | 夹具缺失/gen_fixtures 失败/模型 SHA 不符 |"
+            echo "| 21 | OCR  | pipeline 子进程失败或找不到 book.json |"
+            echo "| 22 | 结构 | 页数/字数/必含字串/CER/章数断言失败 |"
+            echo "| 23 | gate | pipeline.gate 运行即抛异常 |"
+            echo "| 24 | schema | book.json 结构键/块字段/页码越界 |"
+            echo "日志里按 [STAGE x/5] 行定位。"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传产物（book.json / run_info.json / e2e 报告）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts-${{ github.run_number }}
+          path: |
+            _工作记录/工程V1.2_20261126/e2e_out/e2e_report.json
+            _工作记录/工程V1.2_20261126/e2e_out/horizontal/**/book.json
+            _工作记录/工程V1.2_20261126/e2e_out/horizontal/**/run_info.json
+            _工作记录/工程V1.2_20261126/e2e_out/vertical/**/book.json
+            _工作记录/工程V1.2_20261126/e2e_out/vertical/**/run_info.json
+          if-no-files-found: warn
+          retention-days: 14

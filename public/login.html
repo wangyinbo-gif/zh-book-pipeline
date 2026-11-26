@@ -1,0 +1,203 @@
+<!doctype html>
+<!--
+  筑学书库 · 登录页（认证契约 v1 / 任务 S-C）
+  安全约束（务必保持）：
+  1) token 只存在于内存变量与本输入框中：绝不写 localStorage / sessionStorage / IndexedDB，
+     绝不出现在 URL（query、hash、path）里，绝不写进 console，绝不塞进跳转地址。
+     —— 上述存储同源脚本都能读，一旦 XSS 就等于长期泄露；表单也一律 preventDefault，不用 GET 提交。
+  2) 登录成功后服务端通过 Set-Cookie 下发 HttpOnly 会话 Cookie（zhuxue_sid），浏览器自动持有，
+     本页拿到的 csrf 仅存内存变量；页面一跳转即丢弃，由 auth-client.js 再向 /api/auth/status 取回。
+  3) 只允许跳回同源路径（safeNext 校验），防止开放重定向。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>筑学 · 登录</title>
+  <link rel="icon" href="data:," />
+  <style>
+    /* 配色取自 public/style.css 的 :root（--bg/--panel/--ink/--muted/--line/--accent/--shadow），
+       登录页刻意不引用 style.css：白名单页要保持零外部依赖，样式全内联。 */
+    [hidden] { display: none !important; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+      color: #1b1b1b; background: #eeeee9;
+      display: grid; place-items: center; padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 380px; background: #ffffff;
+      border: 1px solid #e2e2da; border-radius: 14px; padding: 30px 28px 22px;
+      box-shadow: 0 10px 36px rgba(0, 0, 0, 0.12);
+    }
+    .logo {
+      width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+      background: #b33f2a; color: #fff; font-size: 22px; font-family: "Songti SC", serif;
+      margin-bottom: 14px;
+    }
+    h1 { margin: 0; font-size: 20px; letter-spacing: 0.06em; font-family: "Songti SC", serif; }
+    .sub { margin: 6px 0 20px; font-size: 12.5px; line-height: 1.7; color: #7a7a72; }
+    label { display: block; font-size: 12px; color: #7a7a72; margin-bottom: 6px; }
+    input {
+      width: 100%; padding: 10px 12px; font-size: 14px; color: #1b1b1b;
+      background: #fbfbf8; border: 1px solid #e2e2da; border-radius: 8px;
+    }
+    input:focus { outline: none; border-color: #b33f2a; background: #fff; }
+    .btn {
+      width: 100%; margin-top: 14px; padding: 10px 14px; font-size: 14px; cursor: pointer;
+      border: 1px solid #b33f2a; background: #b33f2a; color: #fff; border-radius: 8px;
+    }
+    .btn:hover { background: #9e3624; border-color: #9e3624; }
+    .btn[disabled] { opacity: 0.6; cursor: default; }
+    .btn-ghost {
+      display: block; text-align: center; margin-top: 10px; text-decoration: none;
+      background: #fff; color: #1b1b1b; border: 1px solid #e2e2da;
+    }
+    .btn-ghost:hover { border-color: #c9c9c0; background: #fff; color: #1b1b1b; }
+    .msg { margin-top: 14px; font-size: 12.5px; line-height: 1.6; border-radius: 8px; padding: 10px 12px; }
+    .msg.err { color: #8f2f1f; background: #f9e7e1; border: 1px solid #efcfc4; }
+    .msg.hint { color: #7a7a72; background: #f4f4ef; border: 1px solid #e2e2da; }
+    .foot { margin: 18px 0 0; font-size: 11.5px; line-height: 1.8; color: #7a7a72; }
+    .foot code { background: #ecece6; padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="logo">筑</div>
+    <h1>筑学书库</h1>
+    <p class="sub">这台书库已开启访问控制。输入访问口令登录，之后同一浏览器 8 小时内免重复输入。</p>
+
+    <!-- autocomplete="off"：口令不被浏览器/表单记住；提交一律走 JS 并 preventDefault -->
+    <form id="f" autocomplete="off" novalidate>
+      <label for="token">访问口令</label>
+      <input id="token" name="token" type="password" inputmode="text"
+             autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
+             placeholder="AUTH_TOKEN 里设置的口令" aria-describedby="msg" />
+      <button id="go" class="btn" type="button">进入书库</button>
+    </form>
+
+    <div id="openbox" hidden>
+      <div class="msg hint">本机未开启访问控制（open 兼容模式），书库可直接访问。</div>
+      <a id="openLink" class="btn btn-ghost" href="/index.html">直接进入书库</a>
+    </div>
+
+    <div id="msg" class="msg err" role="alert" aria-live="polite" hidden></div>
+
+    <p class="foot">口令连续错误会被临时限流（约 1 分钟）；服务器重启后需要重新登录。<br />
+      口令设置见 <code>AUTH_TOKEN</code> 环境变量。</p>
+  </main>
+
+  <script>
+  (function () {
+    'use strict';
+
+    var DEFAULT_NEXT = '/index.html';
+    var form = document.getElementById('f');
+    var input = document.getElementById('token');
+    var btn = document.getElementById('go');
+    var msgEl = document.getElementById('msg');
+    var openbox = document.getElementById('openbox');
+
+    /* 内存态：页面卸载即消失，绝不落任何持久化存储 */
+    var busy = false;
+    var csrfMem = '';
+
+    function readNext() {
+      try { return new URLSearchParams(location.search).get('next') || ''; } catch (e) { return ''; }
+    }
+
+    /* 只允许同源绝对路径：必须以单个 "/" 开头；挡掉 //host、/\host 这类协议相对跳转，
+       挡掉反斜杠（浏览器会把 \ 归一成 /，可用于绕过）、控制字符与超长值。不合法就回书架。 */
+    function safeNext(raw) {
+      if (typeof raw !== 'string' || !raw.length || raw.length > 2048) return DEFAULT_NEXT;
+      if (raw.charAt(0) !== '/') return DEFAULT_NEXT;
+      if (raw.charAt(1) === '/' || raw.charAt(1) === '\\') return DEFAULT_NEXT;
+      if (raw.indexOf('\\') !== -1) return DEFAULT_NEXT;
+      for (var i = 0; i < raw.length; i++) {
+        var c = raw.charCodeAt(i);
+        if (c < 32 || c === 127) return DEFAULT_NEXT;
+      }
+      return raw;
+    }
+
+    var target = safeNext(readNext());
+
+    function say(text, tone) {
+      msgEl.textContent = text;
+      msgEl.className = 'msg ' + (tone === 'hint' ? 'hint' : 'err');
+      msgEl.hidden = false;
+    }
+    function quiet() { msgEl.hidden = true; msgEl.textContent = ''; }
+
+    function showOpenMode() {
+      form.hidden = true;
+      openbox.hidden = false;
+      quiet();
+    }
+
+    /* 启动探测：open 模式给直达入口；session 且已登录则直接回原页，省一次输入 */
+    try {
+      window.fetch('/api/auth/status', { method: 'GET', cache: 'no-store' }).then(function (r) {
+        return (r && r.ok) ? r.json() : null;
+      }).then(function (j) {
+        if (!j || (j.mode !== 'session' && j.mode !== 'open')) return;
+        if (j.mode === 'open') { showOpenMode(); return; }
+        if (j.authed) location.replace(target);
+      }).catch(function () { /* 探测失败不影响手工登录 */ });
+    } catch (e) { /* ignore */ }
+
+    function setBusy(v) {
+      busy = v;
+      btn.disabled = v;
+      btn.textContent = v ? '登录中…' : '进入书库';
+    }
+
+    function login() {
+      if (busy) return;
+      var token = input.value;
+      if (!token) { say('请先输入访问口令。'); input.focus(); return; }
+      quiet();
+      setBusy(true);
+      var res;
+      window.fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // token 只在请求体里，不进 URL、不进存储
+        body: JSON.stringify({ token: token }),
+        credentials: 'same-origin'
+      }).then(function (r) {
+        res = r;
+        return r.json().catch(function () { return null; });
+      }).then(function (j) {
+        input.value = '';                       // 立刻清掉输入框里的口令
+        if (res.status === 200 && j && j.ok) {
+          // csrf 只进内存变量；跳转后由 auth-client.js 通过 /api/auth/status 重新取回
+          csrfMem = (typeof j.csrf === 'string') ? j.csrf : '';
+          location.replace(target);
+          return;
+        }
+        setBusy(false);
+        if (res.status === 429 || (j && j.error === 'rate_limited')) {
+          say('尝试次数过多，已被限流，请约 1 分钟后再试。');
+        } else if (res.status === 401 || (j && j.error === 'bad_token')) {
+          say('访问口令不正确。');
+        } else {
+          say('登录失败（HTTP ' + (res ? res.status : 0) + '）。请确认书库服务已启动。');
+        }
+      }).catch(function () {
+        input.value = '';
+        setBusy(false);
+        say('无法连接书库服务，请稍后再试。');
+      });
+    }
+
+    btn.addEventListener('click', function (e) { e.preventDefault(); login(); });
+    form.addEventListener('submit', function (e) { e.preventDefault(); login(); }); // 回车：绝不原生提交
+    input.addEventListener('input', quiet);
+    input.focus();
+  })();
+  </script>
+</body>
+</html>

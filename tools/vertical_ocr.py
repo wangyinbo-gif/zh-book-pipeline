@@ -37,6 +37,7 @@ r"""竖排单页 OCR（S2 生产模块，参数化版）
     删除任何 *+deskew-v1.json 即回到投产前行为（可整体回退）。
 """
 from __future__ import annotations
+from paths import ROOT
 
 import hashlib
 import json
@@ -50,8 +51,20 @@ import numpy as np
 from PIL import Image
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_MODEL = HERE / "models" / "ch_PP-OCRv5_rec_mobile.onnx"
-MODEL_ENV = "VERTICAL_OCR_MODEL"
+MODEL_FILENAME = "ch_PP-OCRv5_rec_mobile.onnx"
+TOOLS_MODELS_DIR = HERE / "models"            # ④ 老布局（向后兼容，本机历史位置）
+ROOT_MODELS_DIR = HERE.parent / "models"      # ③ 公仓推荐：项目根 = tools 的父目录
+DEFAULT_MODEL = TOOLS_MODELS_DIR / MODEL_FILENAME  # 兼容旧引用；实际解析走 resolve_model_path()
+MODEL_ENV = "VERTICAL_OCR_MODEL"              # ② 环境变量覆盖
+
+
+class ModelNotFound(FileNotFoundError):
+    """竖排 rec 模型在全部候选路径都缺失。
+
+    继承 FileNotFoundError，兼容既有 `except FileNotFoundError` 调用方。
+    搜索顺序见 resolve_model_path()：① --vmodel/--model 显式 → ② 环境变量
+    VERTICAL_OCR_MODEL → ③ <项目根>/models/ → ④ tools/models/。
+    """
 
 PARAM_VERSION = "vertical-ocr-v1"   # 改切分/校正/归一参数必须递增，否则缓存会假命中
 DEFAULT_SCALE = 3.0
@@ -421,22 +434,80 @@ def enrich_flags(recs: list[dict]) -> None:
 
 # ---------------------------------------------------------------- 模型与引擎
 
+def _default_model_search_paths() -> list[Path]:
+    """默认候选（按优先级）：③ 项目根/models → ④ tools/models。纯路径，不读内容。"""
+    return [ROOT_MODELS_DIR / MODEL_FILENAME, TOOLS_MODELS_DIR / MODEL_FILENAME]
+
+
+def _fmt_search_paths() -> str:
+    """报错文案里的「全部搜索路径」清单（①②③④ 四级，①② 为按需指定项）。"""
+    paths = _default_model_search_paths()
+    return ("  ① 命令行 --vmodel / --model <onnx>（当前未提供）\n"
+            "  ② 环境变量 %s=<onnx>（当前未设置）\n"
+            "  ③ %s\n"
+            "  ④ %s" % (MODEL_ENV, paths[0], paths[1]))
+
+
+def resolve_model_path(explicit=None) -> Path:
+    """解析竖排 rec 模型路径（纯路径逻辑，不加载 onnx、不 import 推理依赖）。
+
+    优先级（① 最高）：
+      ① explicit —— 命令行 --vmodel / --model 透传进来的显式路径；
+      ② 环境变量 VERTICAL_OCR_MODEL；
+      ③ <项目根>/models/ch_PP-OCRv5_rec_mobile.onnx（根 = tools 的父目录，公仓推荐位置）；
+      ④ tools/models/ch_PP-OCRv5_rec_mobile.onnx（老布局，向后兼容）。
+
+    语义（与旧 resolve_model 一致，避免「静默换模型」）：
+      · ① 给了但路径无效 → 直接报错，不回落到默认（否则会用错模型出乱码）；
+      · ② 设了但路径无效 → 直接报错，并提示改正或取消；
+      · ①② 都未给 → 在 ③④ 中取第一个存在的；
+      · 四级全缺 → 抛 ModelNotFound，消息列出全部搜索路径 + 修复指引（env 或放置位置二选一）。
+    """
+    # ① 显式参数：给了就是权威，无效则报错（绝不静默回落到默认模型）
+    if explicit:
+        p = Path(explicit)
+        if p.is_file():
+            return p
+        raise ModelNotFound(
+            "竖排 rec 模型不存在（--vmodel/--model 指定）：%s\n"
+            "  该路径无效，程序不会擅自改用其它模型（会用错模型识别出乱码）。\n"
+            "  二选一修复：改正 --vmodel 路径，或去掉 --vmodel 后按下述默认顺序放置模型：\n%s"
+            % (p, _fmt_search_paths()))
+
+    # ② 环境变量：设了但无效同样报错，附全部搜索路径
+    env = os.environ.get(MODEL_ENV)
+    if env:
+        p = Path(env)
+        if p.is_file():
+            return p
+        raise ModelNotFound(
+            "环境变量 %s 指向的竖排 rec 模型不存在：%s\n"
+            "  二选一修复：改正/取消 %s，或改用下面任一默认位置放置模型：\n%s"
+            % (MODEL_ENV, p, MODEL_ENV, _fmt_search_paths()))
+
+    # ③④ 默认搜索：项目根优先，其次 tools 老布局
+    for cand in _default_model_search_paths():
+        if cand.is_file():
+            return cand
+
+    # 全缺
+    raise ModelNotFound(
+        "找不到竖排 rec 模型 %s。按优先级已搜索全部默认位置：\n%s\n"
+        "  二选一修复：\n"
+        "    · 放置文件：把 %s 放到 ③ <项目根>/models/（推荐，见上）或 ④ tools/models/（老布局）；\n"
+        "    · 或指定路径：设环境变量 %s=<onnx 绝对路径>，或命令行 --vmodel <onnx 路径>。"
+        % (MODEL_FILENAME, _fmt_search_paths(), MODEL_FILENAME, MODEL_ENV))
+
+
 def resolve_model(model_path=None) -> Path:
-    """模型解析顺序：显式参数 → 环境变量 VERTICAL_OCR_MODEL → tools/models/ 默认。"""
-    cand = model_path or os.environ.get(MODEL_ENV) or DEFAULT_MODEL
-    p = Path(cand)
-    if not p.is_file():
-        raise FileNotFoundError(
-            "竖排 rec 模型不存在：%s\n"
-            "  把 ch_PP-OCRv5_rec_mobile.onnx 放到 tools/models/，"
-            "或用 --model / 环境变量 %s 指定路径。" % (p, MODEL_ENV))
-    return p
+    """向后兼容别名：等价于 resolve_model_path(model_path)。新代码请直接调用后者。"""
+    return resolve_model_path(model_path)
 
 
 def make_engine(model_path=None, intra_op_num_threads: int = 4):
     from rapidocr_onnxruntime import RapidOCR
     return RapidOCR(intra_op_num_threads=intra_op_num_threads, inter_op_num_threads=2,
-                    rec_model_path=str(resolve_model(model_path)))
+                    rec_model_path=str(resolve_model_path(model_path)))
 
 
 # ---------------------------------------------------------------- 单页原语（无状态）
@@ -654,7 +725,7 @@ class VerticalOCR:
             raise FileNotFoundError("PDF 不存在：%s" % self.pdf)
         self.scale = float(scale)
         self.ears = [e.strip() for e in (ears or []) if e and e.strip()]
-        self.model_path = str(resolve_model(model_path))
+        self.model_path = str(resolve_model_path(model_path))
         self.cache_dir = Path(cache_dir) if cache_dir else None
         self.param_version = param_version
         self.intra = intra_op_num_threads

@@ -2,6 +2,12 @@
 (function () {
   var params = new URLSearchParams(location.search);
   var bookId = params.get('book');
+  /* 统一出口：有 auth-client.js 就走 zhuxueFetch（session 模式自动补 X-CSRF-Token、401 跳登录），
+     否则退回原生 fetch —— open 模式行为与改造前逐字一致。 */
+  function api(u, o) {
+    if (typeof window.zhuxueFetch === 'function') return window.zhuxueFetch(u, o);
+    return window.fetch(u, o);
+  }
   var els = {
     title: document.getElementById('qbTitle'),
     chapterSel: document.getElementById('chapterSel'),
@@ -73,8 +79,8 @@
     }
     els.title.textContent = '加载中…';
     Promise.all([
-      fetch('/api/questions/' + encodeURIComponent(bookId)),
-      fetch('/api/practice')
+      api('/api/questions/' + encodeURIComponent(bookId)),
+      api('/api/practice')
     ]).then(function (rs) {
       if (!rs[0].ok) throw new Error('这本书还没有题库');
       return Promise.all([rs[0].json(), rs[1].json().catch(function () { return { data: {} }; })]);
@@ -121,7 +127,7 @@
       if (!confirm('清空这本书的全部作答记录？')) return;
       var qids = Object.keys(answerMap);
       qids.forEach(function (qid) {
-        fetch('/api/practice/' + encodeURIComponent(qid) + '?bookId=' + encodeURIComponent(bookId), { method: 'DELETE' }).catch(function () {});
+        api('/api/practice/' + encodeURIComponent(qid) + '?bookId=' + encodeURIComponent(bookId), { method: 'DELETE' }).catch(function () {});
       });
       answerMap = {};
       renderWrong();
@@ -382,7 +388,7 @@
     } catch (e) {}
     checkState = 'loading';
     renderSummary();
-    fetch('/api/books/' + encodeURIComponent(bookId)).then(function (r) {
+    api('/api/books/' + encodeURIComponent(bookId)).then(function (r) {
       if (!r.ok) throw new Error('no book');
       return r.json();
     }).then(function (j) {
@@ -526,7 +532,7 @@
   function finish(q, ok, chosen) {
     submitted = true;
     answerMap[q.id] = { correct: !!ok, chosen: chosen, at: Date.now() };
-    fetch('/api/practice', {
+    api('/api/practice', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bookId: bookId, questionId: q.id, type: q.type, correct: !!ok, chosen: chosen })

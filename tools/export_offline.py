@@ -33,7 +33,7 @@ BOOKS = os.path.join(ROOT, 'books')
 QBANK = os.path.join(ROOT, '题库')
 PUBLIC = os.path.join(ROOT, 'public')
 DEFAULT_OUT = os.path.join(ROOT, '_dist', '筑学书库-离线版')
-SHARED = ['style.css', 'practice.css', 'shelf.js', 'reader.js', 'practice.js', 'offline-api.js']
+SHARED = ['style.css', 'practice.css', 'shelf.js', 'reader.js', 'practice.js', 'offline-api.js', 'auth-client.js']
 SKIP_DIR_PREFIX = '_'
 # 这些格式已经压缩过，zip 里用 STORED，别再浪费 CPU
 STORE_EXT = {'.webp', '.png', '.jpg', '.jpeg', '.gif', '.ico', '.woff2', '.woff', '.ttf', '.otf', '.mp4', '.pdf'}

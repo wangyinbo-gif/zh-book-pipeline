@@ -8,6 +8,13 @@
   var nText = document.getElementById('nText');
   var nExt = document.getElementById('nExt');
 
+  /* 统一出口：有 auth-client.js 就走 zhuxueFetch（session 模式自动补 CSRF、401 跳登录），
+     没有就退回原生 fetch —— open 模式与旧行为逐字一致。 */
+  function api(u, o) {
+    if (typeof window.zhuxueFetch === 'function') return window.zhuxueFetch(u, o);
+    return window.fetch(u, o);
+  }
+
   var allBooks = [];
   var progress = { books: {} };
   var qbanks = {};
@@ -40,9 +47,9 @@
     shelf.innerHTML = '<div class="empty"><h2>正在读取书库…</h2></div>';
     try {
       var rs = await Promise.all([
-        fetch('/api/books'),
-        fetch('/api/progress'),
-        fetch('/api/questions').catch(function () { return null; })
+        api('/api/books'),
+        api('/api/progress'),
+        api('/api/questions').catch(function () { return null; })
       ]);
       var rb = rs[0], rp = rs[1], rq = rs[2];
       allBooks = (await rb.json()).data.books || [];

@@ -1540,7 +1540,7 @@ def main():
     one.add_argument("--vertical", action="store_true",
                      help="竖排右起扫描件：走 tools/vertical_book.py（忽略文字层，不跑横排后处理）")
     one.add_argument("--ear", default="", help="竖排书耳/版心书名，逗号分隔（默认取书名）")
-    one.add_argument("--vmodel", default="", help="竖排 rec 模型 onnx（默认 tools/models/）")
+    one.add_argument("--vmodel", default="", help="竖排 rec 模型 onnx（缺省自动找：根 models/ → tools/models/，可用 VERTICAL_OCR_MODEL 覆盖）")
     one.set_defaults(func=cmd_one)
 
     batch = sub.add_parser("batch", help="转换整个文件夹")
@@ -1552,7 +1552,7 @@ def main():
     batch.add_argument("--from-stage", default="", choices=[""] + ALL_STAGES)
     batch.add_argument("--vertical", action="store_true", help="竖排右起扫描件（同 one --vertical）")
     batch.add_argument("--ear", default="", help="竖排书耳/版心书名，逗号分隔")
-    batch.add_argument("--vmodel", default="", help="竖排 rec 模型 onnx")
+    batch.add_argument("--vmodel", default="", help="竖排 rec 模型 onnx（缺省自动找根 models/ 与 tools/models/）")
     batch.set_defaults(func=cmd_batch)
 
     post = sub.add_parser("post", help="只重跑后处理（不重新 OCR）")

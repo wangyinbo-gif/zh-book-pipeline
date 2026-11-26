@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""重新生成 书单.md（43 本当前数字 + 题库题数）。
+"""重新生成 书单.md（44 本当前数字 + 题库题数）。
 
 用法：python tools\\booklist.py
 数据来源：books\\*\\book.json 的 stats/shelfCategory + 题库\\**\\*.json（同书取题数最多的一份）
@@ -12,6 +12,7 @@ B = os.path.join(root,'books')
 # 题库：同 bookId 取题数最多的一份（正式版）
 banks = {}
 for fp in glob.glob(os.path.join(root,'题库','**','*.json'), recursive=True):
+    if any(seg in fp for seg in ('_backups', '_parts', '_归档', '作废')): continue
     base = os.path.basename(fp)
     if base.startswith('_') or '.bak' in base: continue
     try: d = json.load(open(fp, encoding='utf-8'))

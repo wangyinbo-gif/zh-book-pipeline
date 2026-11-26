@@ -55,7 +55,7 @@ PDF 单页 → 灰度 → 全列宽墨迹投影 → 自相关估列距（pitch�
 
 ```bash
 export BOOKROOT=$PWD
-# 模型在本仓库的 models/ 下（竖排分支专用，横排不需要）
+# 模型在本仓库的 models/ 下（竖排分支专用，横排不需要）；tools/models/ 亦可（自动搜索先根后 tools），此 export 仅显式覆盖用
 export VERTICAL_OCR_MODEL=models/ch_PP-OCRv5_rec_mobile.onnx
 
 python tools/pipeline.py one "inbox/scan.pdf" --out books --title 书名 \

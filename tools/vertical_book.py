@@ -961,7 +961,9 @@ def main() -> int:
     ap.add_argument("--book", default="")
     ap.add_argument("--scale", type=float, default=VO.DEFAULT_SCALE)
     ap.add_argument("--ear", default="", help="书耳/版心书名，逗号分隔")
-    ap.add_argument("--model", default="", help="PP-OCRv5 rec onnx（默认 tools/models/）")
+    ap.add_argument("--model", default="",
+                    help="PP-OCRv5 rec onnx。缺省时按 resolve_model_path 顺序查找："
+                         "环境变量 VERTICAL_OCR_MODEL → <项目根>/models/ → tools/models/")
     ap.add_argument("--pages", default="", help="只跑指定页：1-30,41")
     ap.add_argument("--intra", type=int, default=4)
     ap.add_argument("--no-cache", action="store_true", help="不读不写页级缓存")

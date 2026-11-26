@@ -1,0 +1,38 @@
+# requirements-ci.txt — 筑学书库 zh-book-pipeline 端到端 CI 依赖锁定（P1-02/P2-01）
+# 来源：本地项目 .venv 的 pip freeze（Python 3.12.10，锁定时 2026-11-26，锁定人 P1-02 子任务）。
+# 原则：完整闭包精确锁定（含传递依赖），配合「pip install --no-deps -r」使用——
+#   rapidocr-onnxruntime 声明依赖 opencv-python（桌面版），Linux runner 上 import 需 libGL；
+#   故此处以 opencv-python-headless 同版本顶替，并用 --no-deps 防止 pip 再把桌面版拉回来。
+# CI 安装命令：python -m pip install --no-deps -r requirements-ci.txt
+# 注意：opencv-python-headless 按桌面版同版本号钉死（两轨同源同步发版）。2026-11-26 已经
+#   pypi.org/project/opencv-python-headless/5.0.0.93 页面核实存在（HTTP 200），可直接锁定使用。
+
+# —— 核心八件套（本机实测版本）——
+# python: 3.12.10（CI 用 actions/setup-python python-version: "3.12"）
+pillow==13.0.0
+numpy==2.5.4
+pypdfium2==5.14.0
+pymupdf==2.0
+opencv-python-headless==5.0.0.93
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.31.1
+
+# —— 传递依赖闭包（同样锁定，配合 --no-deps 保证与本机 .venv 完全一致）——
+PyYAML==6.0.3
+tqdm==4.70.1
+pyclipper==1.4.0
+shapely==2.2.0
+six==1.17.0
+protobuf==7.36.2
+flatbuffers==25.12.19
+packaging==26.3
+psutil==7.2.2
+networkx==3.7
+tabulate==0.10.0
+pymupdf_layout==2.0
+pymupdf4llm==2.0
+colorama==0.4.6
+
+# 竖排 rec 模型 ch_PP-OCRv5_rec_mobile.onnx 不走 pip：CI 从仓内 models/（公仓布局）或
+#   tools/models/（老布局）读取；SHA-256 清单见 tools/models/MODELS.sha256。
+# rapidocr 自带 det/rec/cls 模型随 wheel 分发，SHA 一并记录于 MODELS.sha256（1.4.4 版）。

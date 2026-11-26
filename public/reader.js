@@ -2,6 +2,9 @@
 (function () {
   const params = new URLSearchParams(location.search);
   const bookId = params.get('book');
+  // 统一出口：有 auth-client.js 就走 zhuxueFetch（session 模式自动补 X-CSRF-Token、401 跳登录），
+  // 否则退回原生 fetch —— open 模式行为与改造前逐字一致。
+  const api = (u, o) => (typeof window.zhuxueFetch === 'function' ? window.zhuxueFetch(u, o) : window.fetch(u, o));
   const els = {
     bookTitle: document.getElementById('bookTitle'),
     bookSub: document.getElementById('bookSub'),
@@ -57,10 +60,10 @@
   async function load() {
     els.bookTitle.textContent = '加载中…';
     const [rb, rp, rbm, rq] = await Promise.all([
-      fetch('/api/books/' + encodeURIComponent(bookId)),
-      fetch('/api/progress'),
-      fetch('/api/bookmarks?bookId=' + encodeURIComponent(bookId)),
-      fetch('/api/questions').catch(() => null)
+      api('/api/books/' + encodeURIComponent(bookId)),
+      api('/api/progress'),
+      api('/api/bookmarks?bookId=' + encodeURIComponent(bookId)),
+      api('/api/questions').catch(() => null)
     ]);
     if (!rb.ok) throw new Error('找不到这本书');
     const jb = await rb.json();
@@ -585,11 +588,11 @@
     const existing = bookmarks.find((b) => b.page === page);
     try {
       if (existing) {
-        await fetch('/api/bookmarks/' + encodeURIComponent(existing.id), { method: 'DELETE' });
+        await api('/api/bookmarks/' + encodeURIComponent(existing.id), { method: 'DELETE' });
         bookmarks = bookmarks.filter((b) => b.id !== existing.id);
         toast('已取消第 ' + page + ' 页书签');
       } else {
-        const res = await fetch('/api/bookmarks', {
+        const res = await api('/api/bookmarks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ bookId, page, chapter: pageChapterTitle(current), excerpt: excerptForPage(current) })
@@ -611,7 +614,7 @@
 
   async function deleteBookmark(id) {
     try {
-      await fetch('/api/bookmarks/' + encodeURIComponent(id), { method: 'DELETE' });
+      await api('/api/bookmarks/' + encodeURIComponent(id), { method: 'DELETE' });
       bookmarks = bookmarks.filter((b) => b.id !== id);
       renderBookmarks();
       markBookmarks();
@@ -670,7 +673,7 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       const ch = pages[current] ? pages[current].chapter : 0;
-      fetch('/api/progress', {
+      api('/api/progress', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bookId, chapterId: chapters[ch] ? chapters[ch].id : null, page: current, total: pages.length })

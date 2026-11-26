@@ -10,6 +10,7 @@ contract that code and tests enforce.
 | `/api/auth/login`, `/api/auth/logout` | POST | anonymous (method-bound) | rate limited 10/min per IP |
 | `/api/auth/status` | GET HEAD | anonymous | `{authed, mode, csrf?}` only |
 | `/api/health` | GET HEAD | anonymous | minimal `{ok, mode}`, no counters |
+| `/api/search` | GET only | session-protected (401 unauth; `/api` paths never 302); `q` 1-96 chars, multi-term AND, `mode=text|figures`, optional `book` filter, `limit≤200`; POST/PATCH fall through 404/405 after CSRF stage | book/chapter/page/block snippet coordinates |
 | `/api/*` business endpoints | GET (reads) / POST PUT PATCH DELETE (writes) | session | writes also require CSRF token + same-origin |
 | `/books/<hash>/assets/*`, `/data/*` static | GET HEAD only (else 405) | session | traversal guard (prefix + realpath) unchanged |
 | Any other path | — | default deny (401 API-like, 302 navigational) | leading-slash variants normalized before classification |

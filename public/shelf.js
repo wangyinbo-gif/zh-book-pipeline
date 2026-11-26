@@ -151,3 +151,77 @@
   bind();
   load();
 })();
+
+/* -------- 全文/图注检索（v1.1.0）：走 api() 统一出口，open 模式透明直通 -------- */
+var Q2 = String.fromCharCode(34);
+
+function initSearch() {
+  var box = document.getElementById("searchBox");
+  var scope = document.getElementById("searchScope");
+  var go = document.getElementById("searchGo");
+  var fig = document.getElementById("searchFig");
+  var clr = document.getElementById("searchClear");
+  if (!box || !scope || !go) return;
+  function fillScope(books) {
+    scope.innerHTML = "";
+    var o = document.createElement("option"); o.value = ""; o.textContent = "全部书库"; scope.appendChild(o);
+    (books || []).forEach(function (b) {
+      var op = document.createElement("option");
+      op.value = b.id; op.textContent = String(b.bookTitle || b.title || b.id).slice(0, 18);
+      scope.appendChild(op);
+    });
+  }
+  window.__fillSearchScope = fillScope;
+  try { fillScope((window.__shelfBooks || [])); } catch (e) {}
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; });
+  }
+  function hi(snippet, q) {
+    var out = esc(snippet);
+    String(q || "").split(/\s+/).filter(Boolean).forEach(function (t) {
+      var et = esc(t);
+      if (et) out = out.split(et).join("<mark>" + et + "</mark>");
+    });
+    return out;
+  }
+  function render(data, q) {
+    var main = document.getElementById("shelf");
+    if (!main) return;
+    var rows = (data.hits || []).map(function (h) {
+      var loc = [h.bookTitle, h.chapterTitle, h.page ? "p" + h.page : ""].filter(Boolean).join(" · ");
+      return "<div class=" + Q2 + "sr" + Q2 + " data-book=" + Q2 + esc(h.book) + Q2 + " data-ch=" + Q2 + h.chapter + Q2 + " data-blk=" + Q2 + h.block + Q2 + ">" +
+        "<div class=" + Q2 + "sr-loc" + Q2 + ">" + esc(loc) + (h.type === "caption" ? " <span class=" + Q2 + "sr-tag" + Q2 + ">图注</span>" : "") + "</div>" +
+        "<div class=" + Q2 + "sr-snip" + Q2 + ">" + hi(h.snippet, q) + "</div></div>";
+    }).join("");
+    main.innerHTML = "<section class=" + Q2 + "sr-panel" + Q2 + "><div class=" + Q2 + "sr-head" + Q2 + ">「" + esc(data.query) + "」共 " + data.total + " 处命中 · " + data.tookMs + "ms · 扫描 " + data.booksScanned + " 本</div>" +
+      (list_or(rows)) + "</section>";
+    Array.prototype.forEach.call(main.querySelectorAll(".sr"), function (el) {
+      el.onclick = function () {
+        var term = box.value.trim().split(/\s+/)[0] || "";
+        location.href = "reader.html?book=" + encodeURIComponent(el.getAttribute("data-book")) + "&chapter=" + el.getAttribute("data-ch") + "&block=" + el.getAttribute("data-blk") + "&term=" + encodeURIComponent(term);
+      };
+    });
+    if (clr) clr.hidden = false;
+  }
+  function list_or(rows) { return rows || "<div class=" + Q2 + "sr-empty" + Q2 + ">无命中</div>"; }
+  function doSearch() {
+    var q = box.value.trim();
+    if (!q) return;
+    var u = "/api/search?q=" + encodeURIComponent(q) + "&mode=" + (fig && fig.checked ? "figures" : "text") + "&limit=120";
+    if (scope.value) u += "&book=" + encodeURIComponent(scope.value);
+    api(u).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.ok) { alert(j.error || "检索失败"); return; }
+      render(j.data, q);
+    }).catch(function () { alert("检索请求失败"); });
+  }
+  go.onclick = doSearch;
+  box.addEventListener("keydown", function (e) { if (e.key === "Enter") doSearch(); });
+  if (clr) clr.onclick = function () {
+    box.value = ""; clr.hidden = true;
+    if (typeof window.loadShelf === "function") window.loadShelf(); else location.reload();
+  };
+}
+if (typeof document !== "undefined") {
+  if (document.readyState !== "loading") initSearch();
+  else document.addEventListener("DOMContentLoaded", initSearch);
+}

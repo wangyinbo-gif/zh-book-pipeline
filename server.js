@@ -174,6 +174,99 @@ function getBook(id) {
   return readJSON(file, null);
 }
 
+/* ---------------- 全文/图注检索（v1.1.0，无预建索引：惰性语料缓存 + 运行时扫描） ----------------
+ * 设计：单机 44 本 / 1250 万字量级下，逐块 indexOf 全扫 <150ms；缓存按 book.json mtime 失效。
+ * 多词 AND；结果带 书/章/页/块 深链坐标；模式 text|figures（图注=displayCaption||caption）。
+ * 鉴权：不在 ANON_PATHS —— 走统一 gate（未登录 401/302），方法只接 GET。 */
+const SEARCH_CACHE = new Map();
+const SEARCH_MAX_BLOCKS = 200000;
+
+function chapterIndexAt(starts, bi) {
+  let lo = 0, hi = starts.length - 1, res = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (starts[mid] <= bi) { res = mid; lo = mid + 1; } else { hi = mid - 1; }
+  }
+  return res;
+}
+
+function bookCorpus(id) {
+  const file = resolveInside(BOOKS, String(id), 'book.json');
+  if (!file) return null;
+  let mt = 0;
+  try { mt = fs.statSync(file).mtimeMs; } catch (e) { return null; }
+  const cached = SEARCH_CACHE.get(id);
+  if (cached && cached.sig === mt) return cached;
+  const book = getBook(id);
+  if (!book) return null;
+  const blocks = Array.isArray(book.blocks) ? book.blocks : [];
+  const chapters = Array.isArray(book.chapters) ? book.chapters : [];
+  const starts = chapters.map(function (c) { return (typeof c.startBlock === 'number' ? c.startBlock : 0); });
+  const corpus = [], figs = [];
+  const n = Math.min(blocks.length, SEARCH_MAX_BLOCKS);
+  for (let i = 0; i < n; i++) {
+    const b = blocks[i];
+    if (!b || typeof b !== 'object') continue;
+    const ch = chapterIndexAt(starts, i) + 1;
+    const chTitle = ch >= 1 && chapters[ch - 1] ? (chapters[ch - 1].title || '') : '';
+    const page = (Array.isArray(b.pages) && b.pages.length) ? b.pages[0] : (typeof b.page === 'number' ? b.page : null);
+    const t = typeof b.text === 'string' ? b.text.trim() : '';
+    if (t && b.type !== 'figure') corpus.push({ i: i, ch: ch, chTitle: chTitle, page: page, type: b.type || 'paragraph', text: t });
+    const cap = ((b.displayCaption || b.caption) || '').trim();
+    if (cap) figs.push({ i: i, ch: ch, chTitle: chTitle, page: page, cap: cap });
+  }
+  const rec = { sig: mt, title: book.bookTitle || book.title || id, corpus: corpus, figs: figs };
+  SEARCH_CACHE.set(id, rec);
+  if (SEARCH_CACHE.size > 64) { const k0 = SEARCH_CACHE.keys().next().value; SEARCH_CACHE.delete(k0); }
+  return rec;
+}
+
+function countTerms(hay, terms) {
+  let total = 0, first = -1;
+  for (const q of terms) {
+    let c = 0, at = hay.indexOf(q);
+    if (at < 0) return null;
+    if (first < 0) first = at;
+    while (at >= 0) { c++; at = hay.indexOf(q, at + q.length); }
+    total += c;
+  }
+  return { count: total, first: first };
+}
+
+function snippetOf(hay, at, span) {
+  const st = Math.max(0, at - span), en = Math.min(hay.length, at + span + 14);
+  return { snippet: (st > 0 ? '…' : '') + hay.slice(st, en) + (en < hay.length ? '…' : ''), rel: at - st + (st > 0 ? 1 : 0) };
+}
+
+function runSearch(q, bookId, mode, limit) {
+  const terms = String(q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
+  if (!terms.length) return { error: 'q 不能为空' };
+  const t0 = Date.now();
+  const ids = bookId ? [String(bookId)] : bookDirs();
+  const hits = [];
+  let total = 0;
+  for (const id of ids) {
+    const rec = bookCorpus(id);
+    if (!rec) continue;
+    const pool = mode === 'figures' ? rec.figs : rec.corpus;
+    for (const it of pool) {
+      const hay = mode === 'figures' ? it.cap : it.text;
+      const m = countTerms(hay, terms);
+      if (!m) continue;
+      total++;
+      const sn = snippetOf(hay, m.first, 40);
+      hits.push({ book: id, bookTitle: rec.title, chapter: it.ch, chapterTitle: it.chTitle,
+        page: it.page, block: it.i, type: mode === 'figures' ? 'caption' : (it.type || 'paragraph'),
+        score: m.count + (it.type === 'heading' ? 5 : 0),
+        snippet: sn.snippet, matchAt: sn.rel });
+    }
+  }
+  hits.sort(function (a, b) { return (b.score - a.score) || String(a.book).localeCompare(String(b.book)) || (a.block - b.block); });
+  return { query: terms.join(' '), mode: mode, total: total, tookMs: Date.now() - t0,
+    booksScanned: ids.length, hits: hits.slice(0, limit) };
+}
+
+
 /* ---------------- 进度 ---------------- */
 const PROGRESS_FILE = path.join(DATA, 'progress.json');
 function loadProgress() {
@@ -831,6 +924,25 @@ function api(req, res, pathname, query) {
   }
 
   // 匿名白名单：保持最小体（认证契约 v1）——只报模式，不回任何书数据
+  if (pathname === '/api/search' && req.method === 'GET') {
+    const qraw = String((query && query.q) || '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 96);
+    if (!qraw) return sendJSON(res, 400, { ok: false, error: 'q 必填（1-96 字符）' });
+    const bkArg = (query && query.book) ? String(query.book) : '';
+    let bk = null;
+    if (bkArg) {
+      bk = safeDecode(bkArg);
+      if (bk === null) return sendJSON(res, 400, { ok: false, error: 'bookId 编码非法' });
+      if (bk.length > MAX_ID_LEN) return sendJSON(res, 400, { ok: false, error: 'bookId 过长' });
+    }
+    const mode = (query && query.mode === 'figures') ? 'figures' : 'text';
+    let lim = parseInt(query && query.limit, 10);
+    if (!Number.isFinite(lim)) lim = 60;
+    lim = Math.min(200, Math.max(1, lim));
+    const r = runSearch(qraw, bk, mode, lim);
+    if (r.error) return sendJSON(res, 400, { ok: false, error: r.error });
+    return sendJSON(res, 200, { ok: true, data: r });
+  }
+
   if (pathname === '/api/health') {
     return sendJSON(res, 200, { ok: true, mode: AUTH_MODE });
   }

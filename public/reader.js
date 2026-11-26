@@ -108,7 +108,7 @@
     if (window.innerWidth <= 1100) els.toc.classList.add('hidden');
     build();
     // 支持从题库跳转：?page=N（1 起）或 ?block=N（正文块下标，更精确）
-    const qBlock = parseInt(params.get('block'), 10);
+    const qBlock = parseInt(params.get('block'), 10);  const qTerm = String(params.get("term") || "").slice(0, 96);  const qCh = Number.parseInt(params.get("chapter"), 10);
     const qPage = parseInt(params.get('page'), 10);
     const info = window.__readerInfo || {};
     if (Number.isFinite(qBlock) && info.blockPage && info.blockPage[qBlock] != null) {
@@ -124,7 +124,7 @@
     els.pageInput.placeholder = '1–' + pages.length;
     renderBookmarks();
     markBookmarks();
-    if (Number.isFinite(qBlock) && blockEls[qBlock]) highlightSource(qBlock);
+    if (Number.isFinite(qBlock) && blockEls[qBlock]) highlightSource(qBlock);    if (qTerm) highlightTerm(qTerm);
   }
 
   function renderChrome() {
@@ -466,7 +466,39 @@
     sourceBi = null;
   }
 
-  function highlightSource(bi) {
+  
+  function highlightTerm(term) {
+    const t = String(term || "").trim();
+    if (!t) return;
+    const targets = (typeof pages !== "undefined" && pages ? pages.map(p => p && p.sheet).filter(Boolean) : []);
+    const scope = targets.length ? targets : [document.body];
+    scope.forEach(node => {
+      const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+        acceptNode(n) { return n.nodeValue && n.nodeValue.indexOf(t) >= 0 ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT; }
+      });
+      const texts = [];
+      while (walker.nextNode()) texts.push(walker.currentNode);
+      texts.slice(0, 300).forEach(n => {
+        const frag = document.createDocumentFragment();
+        let rest = n.nodeValue, guard = 0;
+        while (guard++ < 500) {
+          const at = rest.indexOf(t);
+          if (at < 0) { frag.appendChild(document.createTextNode(rest)); break; }
+          if (at > 0) frag.appendChild(document.createTextNode(rest.slice(0, at)));
+          const mk = document.createElement("mark");
+          mk.className = "q-term-hit";
+          mk.textContent = t;
+          frag.appendChild(mk);
+          rest = rest.slice(at + t.length);
+        }
+        if (rest) frag.appendChild(document.createTextNode(rest));
+        if (n.parentNode) n.parentNode.replaceChild(frag, n);
+      });
+    });
+    const firstHit = document.querySelector(".q-term-hit");
+    if (firstHit && typeof firstHit.scrollIntoView === "function") firstHit.scrollIntoView({ block: "center" });
+  }
+function highlightSource(bi) {
     clearSource();
     const els = blockEls[bi];
     if (!els || !els.length) return;

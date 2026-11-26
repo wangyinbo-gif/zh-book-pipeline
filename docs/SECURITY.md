@@ -36,6 +36,8 @@ use must enable authentication and prefer HTTPS or a trusted VPN.
   via `ALLOW_EXTRA_HOSTS` (comma-separated) or requests are rejected with 400 before any
   session check.
 
+Full-text search (v1.1.0). `/api/search` rides the same gate — deliberately absent from the anonymous whitelist, so unauthenticated calls get 401 (API paths never 302, asserted by R23). Query terms are matched against an in-process corpus cache invalidated by `book.json` mtime; snippets are bounded (≤96 chars, ≤200 hits, 6 terms) and rendered client-side with escaping. Deep-links (`reader.html?block=&term=`) expose only local coordinates behind the gate.
+
 ## Deployment modes
 
 - **A. Local (default)**: `node server.js` on 127.0.0.1; auth optional. Set `AUTH_TOKEN` to

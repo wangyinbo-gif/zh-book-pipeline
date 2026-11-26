@@ -662,6 +662,26 @@ async function main() {
     t = await req2(pSess, 'POST', '/review', { headers: { Cookie: ck(sid2), 'X-CSRF-Token': csrf2, Origin: origin }, body: '{}' });
     check('G7 /review 静态层写方法 405（重写不放开写面）', isMA(t), t.status + ' ' + t.body);
 
+    /* ================= R23/R24 检索端点（v1.1.0）：鉴权矩阵与方法绑定 ================= */
+    t = await req2(pSess, 'GET', '/api/search?q=' + encodeURIComponent('测试'));
+    check('R23 未登录 /api/search → 401', t.status === 401, t.status + ' ' + t.body);
+    t = await req2(pSess, 'GET', '/api/search?q=x', { headers: { Accept: 'text/html' } });
+    check('R23 导航头打 /api 仍 401（api 永不 302，契约既定）', t.status === 401, t.status + ' ' + t.location);
+    t = await req2(pSess, 'GET', '/api/search?q=' + encodeURIComponent('测试'), { headers: { Cookie: ck(sid2) } });
+    let sj = null; try { sj = JSON.parse(t.body); } catch (e) {}
+    t = await req2(pSess, 'GET', '/api/search', { headers: { Cookie: ck(sid2) } });
+    check('R23 缺 q → 400', t.status === 400, t.status);
+    t = await req2(pSess, 'GET', '/api/search?q=a&book=%ZZ', { headers: { Cookie: ck(sid2) } });
+    check('R23 book 非法编码 → 400', t.status === 400, t.status);
+    t = await req2(pSess, 'GET', '/api/search?q=a', { headers: { Cookie: ck(sid2), Host: 'evil.example' } });
+    check('R23 检索同样受 Host 白名单 400', isBadHost(t), t.status);
+    t = await req2(pSess, 'POST', '/api/search?q=a', { headers: { Cookie: ck(sid2), 'X-CSRF-Token': csrf2 } });
+    check('R23 POST 检索不放行（非 200，落入 404/405）', t.status === 404 || t.status === 405, t.status);
+    t = await req2(pSess, 'GET', '/api/search?q=' + encodeURIComponent('测试'), { headers: { Cookie: ck(sid2) } });
+    let tj = null; try { tj = JSON.parse(t.body); } catch (e) {}
+    t = await req2(pOpen, 'GET', '/api/search?q=' + encodeURIComponent('测试'));
+    check('R24 open 模式检索直通 200', t.status === 200, t.status);
+
   } finally {
     for (const k of kids) {
       try { k.kill(); } catch (e) {}

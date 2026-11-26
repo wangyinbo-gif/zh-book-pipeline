@@ -29,7 +29,14 @@
       <button class="tab" data-cat="扩展">扩展<span class="tab-n" id="nExt">0</span></button>
     </div>
     <select id="quickJump" class="quick-jump" aria-label="快速跳转"></select>
-  </section>
+  <section class="search-bar" id="searchBar">
+  <input id="searchBox" class="search-input" type="search" placeholder="全文检索：空格分词，Enter 搜索" aria-label="全文检索" maxlength="96">
+  <select id="searchScope" class="search-scope" aria-label="检索范围"></select>
+  <button id="searchGo" class="btn" type="button">检索</button>
+  <label class="search-mode"><input type="checkbox" id="searchFig" /> 图注</label>
+  <button id="searchClear" class="btn btn-ghost" type="button" hidden>清除</button>
+</section>
+</section>
 
   <main id="shelf" class="shelf"></main>
 

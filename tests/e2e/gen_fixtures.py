@@ -173,7 +173,10 @@ V_MUST = {
 STRUCTURE_KEYS = ["title", "blocks", "stats", "chapters"]
 
 _FONT_CANDS = [r"C:/Windows/Fonts/msyh.ttc", r"C:/Windows/Fonts/simsun.ttc",
-               r"C:/Windows/Fonts/simhei.ttf"]
+               r"C:/Windows/Fonts/simhei.ttf",
+               "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+               "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+               "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"]
 
 
 def _font_maker():

@@ -1,138 +1,142 @@
 # zh-book-pipeline · 中文扫描书 → 结构化可读书稿
 
-一套把**扫描版中文书籍（PDF）**变成**结构化、可质检、可阅读**电子书稿的工具链：
-渲染 → OCR/文字层 → 块级结构（标题/正文/图/表/注/图注）→ 章节重建 → 三态质检 → 阅读器/离线包/题库。
+一套把**扫描版中文书籍（PDF）**变成**结构化、可质检、可阅读**电子书稿的完整工具链：
+渲染 → OCR/文字层 → 块级结构（标题/正文/图/表/注/图注）→ 章节重建 → 三态质检 → 本地阅读器/离线包/题库。
+零 Web 框架（阅读器与服务器是无依赖 Node + 原生 JS），OCR 全 CPU 可跑，单人单机可复现全流程。
 
-> 本仓库只包含**工具与文档**。真实书库数据（正文、插图、原 PDF）不随仓库分发，原因见
-> [docs/DATASET.md](docs/DATASET.md)。
+> 仓库包含**工具、文档与公版原文抽样数据集**（`samples/public_domain_sampling/`）。
+> 真实书库数据（扫描页、插图、整书正文）不随仓库分发，原因见 [docs/DATASET.md](docs/DATASET.md)。
 
-## 它解决什么问题
+## 技术原理（一图流）
 
-扫描书直接 OCR 得到的是「一页一坨文字」，读不了、也校对不了。本项目在 OCR 之上做**结构化清洗**：
+```
+输入 PDF ──► ① 渲染        pypdfium2 / PyMuPDF，Matrix(3,3)≈216dpi 灰度位图
+          ──► ② 取文        双通道二选一（准入判据决定，见下）
+               文字层通道    内嵌层七判据审查（A乱码/B空层/C体量/D bigram/E缺文/F对基线序/G流序自查）
+                            ——通不过必须走 OCR；历史教训：文字层直取曾造成倒置+丢字 304 处
+               OCR 通道      RapidOCR（PP-OCR det+rec，onnxruntime，CPU）
+                 横排        检测框行序 + 置信度
+                 竖排        独立分支：列槽投影分列 → 字列切单字 → 字形直立横拼 rec（不用检测框）
+                            + 页级去倾斜：±3°/0.25° 投影方差找角、2× 谐波回退、转正后结构校验
+                            （pitch/slots 落回全书中位带才采用；变体缓存键可整体回退）
+          ──► ③ 结构化      行→栏→块：6 种块型 heading/paragraph/figure/table/note/caption；
+                            图区=墨迹几何+版式信号判定，裁切 assets/*.webp；图注照录原页印刷文字并一一配对，
+                            保留「页码-原页-图注-章节」四元组追溯
+          ──► ④ 章节重建    目录页识别/卷端三形态/卷序连续护栏/锚点校正；章→节→页码映射，跨页续段（pages 字段）
+          ──► ⑤ 质检        gate 12 项门槛（程序）+ textcheck/coverage（机器对照）+ 人工目视 = 三态 doctrine
+          ──► ⑥ 消费        book.json 单一事实源 → 本地阅读器（书架/阅读/练习三页）→ 离线静态包 → 题库
+```
 
-- 把页面文字拆成 **6 种块**：`heading` / `paragraph` / `figure` / `table` / `note` / `caption`
-- 图版单独裁切为 `assets/*.webp`，图注与图**一一配对**（图注照录原页印刷文字，不拟题）——保留「页码-原页-图注-章节」四元组追溯
-- 按原书目录重建 **章 / 节 / 页码映射**，并给出章首末块，支持跨页续段（`pages` 字段）
-- 每本书写出 `book.json`（单一事实源）与 `stats`（页/字/章/图/配注数，工具重算，不手写）
+关键设计判断（都来自实盘翻车与修复，非拍脑袋）：
+
+- **「程序绿灯 ≠ 内容干净」**：曾实证 47–65% 乱码页在 12 项 gate 全绿下通过——所以坚持三态，只有人工目视算深审。
+- **文字层不可默认信任**：乱序、丢字、伪码位是常态；`textlayer_admission.py` 七判据机判「该不该用层」，其中 G 流序自查（块流序 vs 视觉序）专治「书的数据本来就来自这层」的同源盲区。
+- **页级异常先量化再修**：`skew_census.py` 全库倾斜普查 4,962 强结构页，异常率 0.44%——把「疑似系统病」证伪成「个别页事故」，避免全库回炉。
+- **修复必须可归因可回滚**：`lost_diff.py`（OCR 行 vs 书稿全语料逐行包含）、`pollute_scan.py`（广告/书眉夹带）逐页证据；写回优先并入既有块（不动 startBlock），改前双备份。
+- **缓存即责任**：OCR 结果带参数版本键（PARAM_VERSION + 去倾斜变体位），删变体文件即整体回退；改参数必须递增版本，防假命中。
+
+
+## 流水线与用法
+
+```bash
+pip install pymupdf pypdfium2 opencv-python-headless rapidocr-onnxruntime pillow numpy
+export BOOKROOT=/path/to/library    # 其下 books/ 题库/ data/ inbox/
+
+python tools/pipeline.py one "inbox/some-book.pdf"           # 一本全链：下表 8 阶段
+python tools/pipeline.py one "inbox/vertical-scan.pdf" --vertical --ear 书名,书名末三字
+python tools/pipeline.py post "books/some-book"              # 只重跑后处理（不重新识别）
+python tools/pipeline.py recheck "books/some-book"           # gate+textcheck+coverage → 质检.json
+python -m unittest discover -s tools                         # 工具回归（105 项，零数据依赖）
+
+node server.js                                               # http://127.0.0.1:4590 见「部署与安全」
+```
+
+| 阶段 | 脚本 | 干什么 |
+| --- | --- | --- |
+| convert | `pdf2book.py` | 渲染 + OCR/文字层 → book.json + assets |
+| bookfix | `bookfix.py` | 清书名尾标、去目录页、重建章节 |
+| postfix | `postfix_book.py` | 跨页/跨插图续段合并、图例并入图注 |
+| readability | `pipeline.py` | 删广告页与误检图、合并断段、补图注 |
+| toc / dims | `pipeline.py` | 「第N篇」并入「第N章」；插图补宽高 |
+| proofread | `proofread.py` | 校对清单.md（必看/参考分级）+ proofread.json |
+| preview | `pipeline.py` | 翻页预览 preview.html |
+| recheck | `pipeline.py recheck` | 三态第①②层复跑，写 质检.json 与报告「复查」节 |
+
+## 功能一览
+
+- **竖排古籍**：`vertical_ocr.py` / `vertical_book.py`——投影分列、直立横拼识别、页级去倾斜、卷端定章、页级诊断闸；细节 [docs/VERTICAL-OCR.md](docs/VERTICAL-OCR.md)。
+- **本地阅读器**：零依赖 Node 服务器 + 原生 JS 三页（书架/阅读器/练习），翻页、书签、进度、图注悬浮。
+- **离线包**：`export_offline.py` 把任意书打成纯静态目录，断网可读。
+- **题库**：`qbank*.py` 生成/校验/导出（本书房实盘 9 套 5,594 题），练习页直接消费。
+- **图版工具链**：`figgap.py`（缺口报告）、`figure_audit.py`（原页 vs 书稿逐图对照）、`figure_asset_boxes.py`（旧资产回配定位，注意 scale=3.0/4.0 坐标系换算）、`review_batch.py`（批量目视辅助）。
+- **数据修复工具**：`textlayer_admission.py`（文字层准入）、`skew_census.py`（倾斜普查）、`lost_diff.py`（丢行归因）、`pollute_scan.py`（夹带扫描）。
+- **统计与发布**：`project_stats.py`（README 锚点统计块 + project_stats.json + 发布快照）、`check_stats.py`（漂移即红）、`export_public_sample.py` 方法学见 [docs/PUBLIC-SAMPLING.md](docs/PUBLIC-SAMPLING.md)。
+- **端到端自检**：`e2e_check.py` + 自渲染公版夹具（横 6 页/竖 4 页），五阶段退出码定位，CI 与本地同路径。
+
+## 三态质检
+
+1. **程序绿灯**：`gate` 12 项门槛 + textcheck/proofread/coverage（机器可判定）
+2. **逐页机器对照**：OCR 原文 vs 书稿，按页覆盖率与偏移，抓整页丢文/整段串行
+3. **逐页人工目视**：只有第③层算深审；「28 本程序绿」≠「28 本可展示」
+
+命令与验收见 [docs/QUALITY.md](docs/QUALITY.md)。
+
+## 部署与安全
+
+- **模式 A 本机**（默认）：绑 127.0.0.1；不设 `AUTH_TOKEN` 则完全开放（open 模式行为逐字节不变）。
+- **模式 B 局域网/反代**：必须设 `AUTH_TOKEN`（否则拒绝启动），`HOST=0.0.0.0`；HTTPS 交给反代或 VPN。
+- **认证契约 v1**（v1.0.7 起）：登录页 → HttpOnly 会话 Cookie（8h 绝对过期，重启失效）→ 全路由同一 gate：
+  Host 白名单 400（防 DNS rebinding）→ 匿名路径方法绑定 405 → open 直通 → 未认证 API 401 / 导航 302 → CSRF 403 → 分发。
+  前端 `auth-client.js` 统一 fetch 出口（open 模式透明直通，离线包零改动）。
+- **已知限制**：会话存内存（单进程约束）；`TRUST_PROXY=1` 时限流退化为按代理 IP；自定义域名需 `ALLOW_EXTRA_HOSTS`。
+- 全路由审计表 [docs/ROUTE-SECURITY-MATRIX.md](docs/ROUTE-SECURITY-MATRIX.md)；威胁模型与部署细节 [docs/SECURITY.md](docs/SECURITY.md)。
+
+## 公版抽样数据集（v1.0.9）
+
+`samples/public_domain_sampling/`：六本公版古籍正文抽样（45% 目标线、完整章确定性贪心、无标点原字）+ 三本现代著作结构包。
+剥离规则（现代标点/注释/译文/校记/书影/出版信息六项）与出口复验（全样本零非汉字）见 [docs/PUBLIC-SAMPLING.md](docs/PUBLIC-SAMPLING.md)。
+
+
+## 测试与自动化（CI）
+
+- **smoke.yml**（每次 push）：语法 / 工具回归 unittest（105 项）/ 示例样书结构 / 服务端安全 R1-R22（164 断言，Node 原生测试）。
+- **e2e.yml**（workflow_dispatch + 相关路径 push + 每周五）：真实扫描 PDF 全链——`tests/e2e/gen_fixtures.py` 现场渲染公版夹具（无二进制入库、零版权），五阶段断言（渲染/OCR/结构/gate/schema），失败退出码 20-24 定位阶段。
+- **依赖可复现**：CI 安装 `pip install --no-deps -r requirements-ci.txt`（从本机 .venv 全闭包精确锁定，opencv 以同版本 headless 顶替防 libGL）；OCR 模型 SHA-256 清单 `tools/models/MODELS.sha256`；`run_info.py` 为每次转换落盘 commit/依赖/模型/输入哈希。
+- **统计守护**：README 数字全部机器生成（锚点块 + STATS-DATA 机读行），`check_stats.py` 不一致即 exit 1；发布快照 `project_stats.py --snapshot <tag>` 拒覆盖。
+
+## 目录结构
+
+```
+tools/            全部流水线/质检/修复/统计脚本（test_*.py 105 项回归随仓）
+public/           阅读器前端（index/reader/practice + login + auth-client，零构建）
+server.js         本地书库服务器（零第三方依赖，安全回归 R1-R22）
+samples/          demo-book（自制 3 页样书）+ public_domain_sampling（公版抽样数据集）
+tests/e2e/        端到端夹具生成器 + 期望值（PDF 现场渲染不入库）
+docs/             QUALITY / SECURITY / ROUTE-SECURITY-MATRIX / VERTICAL-OCR / PUBLIC-SAMPLING / DATASET / ARCHITECTURE
+models/           竖排识别模型（PP-OCRv5 rec mobile，入库分发，SHA 见 tools/models/MODELS.sha256）
+```
+
+## 实盘规模
 
 <!-- BEGIN PROJECT-STATS (auto-generated by tools/project_stats.py; 勿手改本块) -->
 实盘规模（现算 2026-11-26）：**44 本 / 17,513 页 / 12,525,558 字 / 632 章 / 14,869 图（配注 13,619）**，全部通过程序门禁（gate 44/44）；题库 9 套 / 5,594 题（qbank.py check 0 错 0 警）。
 <!-- STATS-DATA {"books": 44, "chapters": 632, "characters": 12525558, "figures": 14869, "gate_pass": 44, "gate_total": 44, "pages": 17513, "paired_figures": 13619, "question_sets": 9, "questions": 5594, "rule_version": "V1.2-chapters-from-stats.chapters"} -->
-<!-- END PROJECT-STATS -->
-
-## 三态质检
-
-1. **程序绿灯**：`gate`（12 项门槛）/ `textcheck` / `proofread` / `coverage` / `structure` 全过（机器可判定）
-2. **逐页机器对照**：OCR 文本 vs 书稿文本，按页算覆盖率与偏移，抓「整页丢文 / 整段串行」
-3. **逐页人工目视**：只有第 ③ 层算「深审」；程序绿不等于内容对
-
-细节与验收命令见 [docs/QUALITY.md](docs/QUALITY.md)。
-
-## 目录
-
-```
-tools/                 全部流水线脚本（核心入口 pipeline.py）
-  pipeline.py          convert / bookfix / postfix / readability / toc / dims / proofread / preview
-  pdf2book.py          PDF → book.json + assets（OCR 与文字层两条路）
-  bookfix.py           清书名、去目录页、重建章节
-  postfix_book.py      跨页与跨插图续段合并、图例并入图注
-  proofread.py         生成校对清单（必看/参考分级）
-  build_tables.py      表格结构重建
-  review_batch.py      批量人工复核辅助（裁图、对照表）
-  figgap.py            图版缺口报告（OCR 图注/正文引用/页内图块 + PDF 视觉证据）
-  figure_audit.py      图版审计：原页检出图 vs 书稿裁图，逐图覆盖对照
-  figure_asset_boxes.py 旧资产在原页的定位（多尺度对位 + 低置信留证）
-  vertical_ocr.py      竖排单页识别（列槽投影 + 直立横拼 rec + 页级去倾斜）
-  vertical_book.py     竖排整本 → book.json（成段 / 卷章 / 页级闸 / 页级缓存）
-  layout_parse.py      版式解析：栏位判定 / 行归栏 / 组装不变量
-  reflow_book.py       实验性重排验收（只读 OCR + book.json，输出不写回 books/）
-  export_offline.py    导出离线静态版
-  qbank*.py            题库生成/校验/导出
-  test_*.py            诊断/复核工具回归测试（unittest，临时目录）
-public/                零依赖 Web 阅读器与练习页（Node server.js，端口 4590）
-server.js              本地书库服务（零第三方依赖）
-samples/demo-book/     自制 3 页示例样书（无版权内容）
-docs/                  架构、质检、硬规矩、数据、安全、竖排识别、公版样本方法
-```
-
-## 快速开始
-
-环境：Python 3.10+（开发用 3.12）、Node.js（仅阅读器需要）。
-
-```bash
-pip install pymupdf pypdfium2 opencv-python-headless rapidocr-onnxruntime pillow numpy
-
-# 书库根目录：其下有 books/、题库/、data/、inbox/
-export BOOKROOT=/path/to/library        # Windows: set BOOKROOT=D:\library
-
-# 转换一本（PDF 放 inbox/）
-python tools/pipeline.py one "inbox/some-book.pdf"
-
-# 竖排右起扫描本（另走竖排分支，横排流程不受影响）
-# optional override; default search: ./models/ then tools/models/ (both accepted)
-export VERTICAL_OCR_MODEL=models/ch_PP-OCRv5_rec_mobile.onnx
-python tools/pipeline.py one "inbox/vertical-scan.pdf" --vertical --title some-book
-
-# 已有书稿重跑后处理与质检
-python tools/pipeline.py post "books/some-book"
-python tools/proofread.py "books/some-book"
-
-# 工具回归自检（只读，不写书稿）
-python -m unittest discover -s tools
-
-# 阅读器（先放一本书到 books/ 下，或放示例样书）
-mkdir -p books && cp -r samples/demo-book books/demo-book
-node server.js        # http://127.0.0.1:4590
-```
-
-`tools/paths.py` 定义路径约定：`BOOKROOT` 环境变量优先，未设置时取仓库根目录。
-
-## 部署与安全
-
-- 本机默认（模式 A）：`node server.js` 绑 127.0.0.1，可选登录。
-- 设 `AUTH_TOKEN` 即启用**统一会话认证**（v1.0.7）：全部页面/接口/资源同一 gate，登录颁发 HttpOnly 会话 Cookie + CSRF 令牌，写请求校验来源与 Host 白名单（防 DNS rebinding）。
-- 局域网/反代（模式 B）：必须带 token（否则拒绝启动，退出码 78），建议 HTTPS 或可信 VPN；自定义域名需 `ALLOW_EXTRA_HOSTS`，反代 `TRUST_PROXY=1`。
-- 安全测试 R1-R22 已入 CI（164 断言）；细节见 [docs/SECURITY.md](docs/SECURITY.md) 与 [docs/ROUTE-SECURITY-MATRIX.md](docs/ROUTE-SECURITY-MATRIX.md)。
-
-## 数据说明
-
-- 仓库**不含任何真实书籍正文、插图或 PDF**；`samples/demo-book` 为自制样书。
-- 工具设计上假设你**有权处理**输入文档（自有扫描件、公有领域作品、已获授权内容）。
-- 请遵守输入文档的版权与许可；本项目不对使用者的输入内容承担责任。
-
-## 状态与限制
-
-- 主要针对**中文横排与竖排扫描书**调校，OCR 依赖 RapidOCR（onnxruntime，CPU 可跑）；
-  竖排走独立分支（投影分列 + 字形直立横拼 rec，不用检测框），路线与页级去倾斜见
-  [docs/VERTICAL-OCR.md](docs/VERTICAL-OCR.md)。
-- 版面极端复杂（多栏、表格套图、双页跨版）需要人工介入；工具提供裁图/对照/回退辅助，不保证全自动。候选召回与诊断各自独立验证，不自动删块。
-- 仓库内脚本是实盘工具，部分为单书一次性脚本（页面范围、正则阈值按你的书库重标），按需修改后使用。
-- 公版原文样本的剥离 / 抽样 / 出口复验方法见 [docs/PUBLIC-SAMPLING.md](docs/PUBLIC-SAMPLING.md)；
-  **抽样数据集本体已随 v1.0.9 入库**：[samples/public_domain_sampling/](samples/public_domain_sampling/)（六本正文样本 + 三本结构包）；
-  本仓库不含任何书籍正文，也不含逐本书目配置台账。
-- 对外展示只使用已深审的书（28 本仅程序绿灯的书未做逐页人工目视，不作展示依据）。
-
-## 测试与自动化
-
-- **smoke.yml**（每次 push）：语法检查 / 工具回归 / 样书结构 / 服务端安全 R1-R22（164 断言）。
-- **e2e.yml**（workflow_dispatch + 相关路径 push + 每周）：自渲染公版夹具（横 6 页 / 竖 4 页）走完整
-  渲染→OCR→结构→gate→schema 链，`tests/e2e/gen_fixtures.py` 现场生成、二进制不入库；
-  依赖用 `pip install --no-deps -r requirements-ci.txt` 全闭包精确锁定，模型对 `tools/models/MODELS.sha256` 复核。
-- **统计守护**：`tools/project_stats.py` 生成 README 锚点统计块与 `reports/project_stats.json`；`tools/check_stats.py` 重算比对，漂移即 exit 1；发布快照 `--snapshot <tag>` 拒覆盖。
-- **章节口径**：对外数字 = Σ `stats.chapters`（632，2026-11-26 现算）；历史 636 为数组口径，差异考古见 Release Notes。
+<!-- END PROJECT-STATS -
 
 ## 版本
 
-发布走 git tag + GitHub Release，tag 说明即摘要（完整历史见 [Releases](../../releases)）。
+发布走 git tag + GitHub Release（完整历史见 [Releases](../../releases)）。
 
 | tag | 日期 | 摘要 |
-|---|---|---|
-| `v1.0.8` | 2026-11-26 | 工程批：认证前端六件补录入仓（v1.0.7 缺件修复）+ 模型路径四级解析 resolve_model_path + 统计自动化 project_stats/check_stats（632/636 口径考古定案）+ e2e 真实 PDF 流水线（tests/e2e 自渲染夹具 + requirements-ci.txt 全闭包锁定 + MODELS.sha256）+ 审计四工具 skew_census/textlayer_admission/lost_diff/pollute_scan |
-| `v1.0.7` | 2026-11-26 | 安全批：统一会话认证（Auth contract v1）+ CSRF + Host 白名单（DNS rebinding）+ 方法绑定/变体归一 + AUTH_ENFORCE 防自锁；server.js 557→996；服务端安全回归 164 项 |
-| `v1.0.6` | 2026-11-26 | 竖排分支投产：`--vertical` 入口 + 页级去倾斜（±3° 投影方差找角、2× 谐波回退、变体缓存键）+ 竖排页级闸；单测 30 项；`recheck` 报告 gate 项数改按实际 12 项渲染 |
-| `v1.0.5` | 2026-11-25 | 安全 P0-01：路径边界改 `path.relative` + `realpath`，四路由统一 `resolveInside`；回归 31 例 |
+| --- | --- | --- |
+| `v1.0.9` | 2026-11-26 | 数据发布：公版原文抽样数据集入库（九书修复轮终态之后；6 本正文样本 + 3 本结构包；净化终扫零红线） |
+| `v1.0.8` | 2026-11-26 | 工程批：认证前端六件补录入仓（修 v1.0.7 缺件）+ resolve_model_path 四级解析 + 统计自动化（632/636 口径考古定案）+ 真实 PDF e2e（自渲染夹具 + requirements-ci 锁定 + MODELS.sha256）+ 审计四工具 |
+| `v1.0.7` | 2026-11-26 | 安全批：统一会话认证（契约 v1）+ CSRF + Host 白名单 + 方法绑定 + AUTH_ENFORCE 防自锁；server.js 557→996；安全回归 164 断言 |
+| `v1.0.6` | 2026-11-26 | 竖排投产：`--vertical` 入口 + 页级去倾斜（投影方差找角/谐波回退/变体缓存）+ 竖排页级闸；单测 30 |
+| `v1.0.5` | 2026-11-25 | 安全 P0-01：路径边界 path.relative + realpath，四路由统一 resolveInside |
 | `v1.0.4` | 2026-11-25 | 古籍卷系三形态识别 + 熔段图注提取 + gate「卷序连续」护栏 |
+| 更早 | — | v1.0.0-1.0.3：主链路与阅读器成型、gate 体系、题库与离线包 |
 
 ## License
 
-MIT，见 [LICENSE](LICENSE)。
+MIT（见 [LICENSE](LICENSE)）。`samples/public_domain_sampling` 的原文本身属公版；工具与文档版权如上。

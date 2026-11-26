@@ -47,7 +47,7 @@ jobs:
       - name: 依赖锁定安装（--no-deps：闭包已全量锁定，防 rapidocr 拉桌面版 opencv 顶掉 headless）
         run: |
           python -m pip install --no-deps -r requirements-ci.txt
-          python -c "import PIL, numpy, fitz, pdfium, cv2, rapidocr_onnxruntime, onnxruntime; print('deps ok')"
+          python -c "import PIL, numpy, fitz, pypdfium2, cv2, rapidocr_onnxruntime, onnxruntime; print('deps ok')"
 
       - name: 模型 SHA-256 复核（tools/models/MODELS.sha256）
         run: python tools/e2e_check.py --verify-models

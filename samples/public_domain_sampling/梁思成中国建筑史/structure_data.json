@@ -1,0 +1,146 @@
+{
+ "book": "梁思成中国建筑史",
+ "kind": "structure-only",
+ "sourceAuthor": "梁思成（1972 年卒）",
+ "sourceBookDir": "梁思成中国建筑史 (梁思成) ",
+ "publicDomainStatus": "现代著作，公版状态与插图版权复杂（方案 §二判定：暂只公开结构数据，正文不导出）。",
+ "containsBodyText": false,
+ "stats": {
+  "pages": 432,
+  "chars": 149284,
+  "paragraphs": 971,
+  "figures": 502,
+  "paired": 501,
+  "chapters": 9
+ },
+ "chapterTree": [
+  {
+   "title": "前言与序",
+   "level": 0,
+   "startBlock": 0,
+   "endBlock": 43,
+   "chars": 6966,
+   "bodyChars": 6071,
+   "figures": 3,
+   "pdfPages": [
+    1,
+    13
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第一章 绪",
+   "level": 0,
+   "startBlock": 43,
+   "endBlock": 147,
+   "chars": 12225,
+   "bodyChars": 8824,
+   "figures": 17,
+   "pdfPages": [
+    15,
+    29
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第二章 上古时期",
+   "level": 0,
+   "startBlock": 147,
+   "endBlock": 178,
+   "chars": 2607,
+   "bodyChars": 2063,
+   "figures": 3,
+   "pdfPages": [
+    30,
+    35
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第三章 两汉",
+   "level": 0,
+   "startBlock": 178,
+   "endBlock": 302,
+   "chars": 9669,
+   "bodyChars": 7108,
+   "figures": 34,
+   "pdfPages": [
+    36,
+    67
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第四章 魏、晋、南北朝",
+   "level": 0,
+   "startBlock": 302,
+   "endBlock": 414,
+   "chars": 11291,
+   "bodyChars": 8741,
+   "figures": 34,
+   "pdfPages": [
+    68,
+    99
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第五章 隋、唐",
+   "level": 0,
+   "startBlock": 414,
+   "endBlock": 570,
+   "chars": 15497,
+   "bodyChars": 12586,
+   "figures": 34,
+   "pdfPages": [
+    100,
+    142
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第六章 五代、宋、辽、金",
+   "level": 0,
+   "startBlock": 570,
+   "endBlock": 1000,
+   "chars": 46661,
+   "bodyChars": 37177,
+   "figures": 158,
+   "pdfPages": [
+    143,
+    299
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第七章 元、明、清",
+   "level": 0,
+   "startBlock": 1000,
+   "endBlock": 1494,
+   "chars": 42668,
+   "bodyChars": 32827,
+   "figures": 214,
+   "pdfPages": [
+    300,
+    427
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第八章 结尾",
+   "level": 0,
+   "startBlock": 1494,
+   "endBlock": 1513,
+   "chars": 1700,
+   "bodyChars": 1478,
+   "figures": 5,
+   "pdfPages": [
+    428,
+    432
+   ],
+   "printedPages": null
+  }
+ ],
+ "printedPageMapping": {},
+ "note": ""
+}

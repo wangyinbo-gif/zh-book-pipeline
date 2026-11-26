@@ -27,6 +27,12 @@ python tools/pipeline.py recheck "your-book"
 
 产出：`books/<书名>/book.json`（结构化书稿）、`assets/*.webp`（插图）、`校对清单.md`（人工复核清单）。
 
+## 公版原文抽样数据集
+
+`samples/public_domain_sampling/`（2026-11-26 首发，v1.0.9）：六本公版古籍正文抽样（45% 目标线、
+完整章确定性贪心、无标点原字）+ 三本现代著作结构包。公版依据、剥离与复验规则见
+[docs/PUBLIC-SAMPLING.md](PUBLIC-SAMPLING.md) 与各目录 README。除该抽样外，本仓库仍不含任何书稿正文。
+
 ## 示例样书
 
 `samples/demo-book/` 是手工编写的 3 页样书（文字与示意图均为自制），演示 `book.json` 结构、

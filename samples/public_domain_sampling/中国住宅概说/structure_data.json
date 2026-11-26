@@ -1,0 +1,431 @@
+{
+ "book": "中国住宅概说",
+ "kind": "structure-only",
+ "sourceAuthor": "刘敦桢（1968 年卒）",
+ "sourceBookDir": "中国住宅概说 (刘敦桢) ",
+ "publicDomainStatus": "现代著作，公版状态与版式/图片权利待人工确认（方案 §二判定：暂只公开结构数据，正文不导出）。",
+ "containsBodyText": false,
+ "stats": {
+  "pages": 251,
+  "chars": 54313,
+  "paragraphs": 367,
+  "figures": 248,
+  "paired": 247,
+  "chapters": 26
+ },
+ "chapterTree": [
+  {
+   "title": "中国住宅概说",
+   "level": 0,
+   "startBlock": 0,
+   "endBlock": 10,
+   "chars": 614,
+   "bodyChars": 238,
+   "figures": 4,
+   "pdfPages": [
+    1,
+    6
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "（另一幅亦为福山氏摄于明孝陵）",
+   "level": 0,
+   "startBlock": 10,
+   "endBlock": 89,
+   "chars": 10720,
+   "bodyChars": 9344,
+   "figures": 16,
+   "pdfPages": [
+    7,
+    37
+   ],
+   "printedPages": [
+    -9,
+    3
+   ]
+  },
+  {
+   "title": "十北华慶美堂西夏而三分",
+   "level": 0,
+   "startBlock": 89,
+   "endBlock": 118,
+   "chars": 3086,
+   "bodyChars": 2660,
+   "figures": 11,
+   "pdfPages": [
+    38,
+    49
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "山东济宁县两城山汉画像石",
+   "level": 0,
+   "startBlock": 118,
+   "endBlock": 136,
+   "chars": 2025,
+   "bodyChars": 1745,
+   "figures": 7,
+   "pdfPages": [
+    50,
+    59
+   ],
+   "printedPages": [
+    33,
+    33
+   ]
+  },
+  {
+   "title": "宋画文姬归汉图的一部分",
+   "level": 0,
+   "startBlock": 136,
+   "endBlock": 146,
+   "chars": 1248,
+   "bodyChars": 1075,
+   "figures": 3,
+   "pdfPages": [
+    60,
+    64
+   ],
+   "printedPages": [
+    43,
+    43
+   ]
+  },
+  {
+   "title": "安徽歙县潜口乡罗宅梁架",
+   "level": 0,
+   "startBlock": 146,
+   "endBlock": 153,
+   "chars": 110,
+   "bodyChars": 74,
+   "figures": 6,
+   "pdfPages": [
+    65,
+    69
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "江苏扬州市桂花书屋",
+   "level": 0,
+   "startBlock": 153,
+   "endBlock": 199,
+   "chars": 3282,
+   "bodyChars": 2794,
+   "figures": 23,
+   "pdfPages": [
+    70,
+    85
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "（《中国营造学社汇刊》第四卷第2期）",
+   "level": 0,
+   "startBlock": 199,
+   "endBlock": 211,
+   "chars": 1413,
+   "bodyChars": 1217,
+   "figures": 4,
+   "pdfPages": [
+    86,
+    90
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "北京市南郊住宅",
+   "level": 0,
+   "startBlock": 211,
+   "endBlock": 231,
+   "chars": 1941,
+   "bodyChars": 1651,
+   "figures": 10,
+   "pdfPages": [
+    91,
+    98
+   ],
+   "printedPages": [
+    77,
+    77
+   ]
+  },
+  {
+   "title": "云南南华县马鞍山井干式住宅（其一）",
+   "level": 0,
+   "startBlock": 231,
+   "endBlock": 274,
+   "chars": 2575,
+   "bodyChars": 2241,
+   "figures": 21,
+   "pdfPages": [
+    99,
+    112
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "吉林长春市二道河子住宅",
+   "level": 0,
+   "startBlock": 274,
+   "endBlock": 320,
+   "chars": 3280,
+   "bodyChars": 2876,
+   "figures": 14,
+   "pdfPages": [
+    113,
+    126
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "插图6云南丽江县三合院住宅",
+   "level": 0,
+   "startBlock": 320,
+   "endBlock": 343,
+   "chars": 1704,
+   "bodyChars": 1499,
+   "figures": 9,
+   "pdfPages": [
+    127,
+    134
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "安徽歙县西溪南乡黄卓甫宅",
+   "level": 0,
+   "startBlock": 343,
+   "endBlock": 358,
+   "chars": 1106,
+   "bodyChars": 986,
+   "figures": 8,
+   "pdfPages": [
+    135,
+    139
+   ],
+   "printedPages": [
+    118,
+    121
+   ]
+  },
+  {
+   "title": "浙江绍兴县小皋埠乡秦宅平面",
+   "level": 0,
+   "startBlock": 358,
+   "endBlock": 404,
+   "chars": 3059,
+   "bodyChars": 2666,
+   "figures": 17,
+   "pdfPages": [
+    140,
+    154
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "（中国建筑研究室调查）",
+   "level": 0,
+   "startBlock": 404,
+   "endBlock": 414,
+   "chars": 615,
+   "bodyChars": 507,
+   "figures": 4,
+   "pdfPages": [
+    155,
+    159
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "北京市地安门附近住宅",
+   "level": 0,
+   "startBlock": 414,
+   "endBlock": 435,
+   "chars": 1228,
+   "bodyChars": 1063,
+   "figures": 9,
+   "pdfPages": [
+    160,
+    168
+   ],
+   "printedPages": [
+    151,
+    151
+   ]
+  },
+  {
+   "title": "河南开封市裴杨公胡同王宅平面",
+   "level": 0,
+   "startBlock": 435,
+   "endBlock": 446,
+   "chars": 565,
+   "bodyChars": 486,
+   "figures": 6,
+   "pdfPages": [
+    169,
+    173
+   ],
+   "printedPages": [
+    155,
+    155
+   ]
+  },
+  {
+   "title": "（一)此宅建造距今约一百年",
+   "level": 0,
+   "startBlock": 446,
+   "endBlock": 457,
+   "chars": 711,
+   "bodyChars": 613,
+   "figures": 5,
+   "pdfPages": [
+    174,
+    178
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "柘林乡方宅楼层平面图",
+   "level": 0,
+   "startBlock": 457,
+   "endBlock": 487,
+   "chars": 2516,
+   "bodyChars": 2211,
+   "figures": 7,
+   "pdfPages": [
+    179,
+    188
+   ],
+   "printedPages": [
+    171,
+    171
+   ]
+  },
+  {
+   "title": "浙江杭州市烟霞山附近住宅平面",
+   "level": 0,
+   "startBlock": 487,
+   "endBlock": 503,
+   "chars": 1662,
+   "bodyChars": 1443,
+   "figures": 6,
+   "pdfPages": [
+    189,
+    195
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "88182",
+   "level": 0,
+   "startBlock": 503,
+   "endBlock": 523,
+   "chars": 915,
+   "bodyChars": 750,
+   "figures": 15,
+   "pdfPages": [
+    196,
+    203
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "福建永定县客家住宅大夫第",
+   "level": 0,
+   "startBlock": 523,
+   "endBlock": 534,
+   "chars": 1049,
+   "bodyChars": 898,
+   "figures": 4,
+   "pdfPages": [
+    204,
+    208
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "福建永定县环形住宅平面",
+   "level": 0,
+   "startBlock": 534,
+   "endBlock": 563,
+   "chars": 1760,
+   "bodyChars": 1514,
+   "figures": 15,
+   "pdfPages": [
+    209,
+    218
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "河南巩县巴闫乡窑洞式穴居",
+   "level": 0,
+   "startBlock": 563,
+   "endBlock": 580,
+   "chars": 1948,
+   "bodyChars": 1686,
+   "figures": 9,
+   "pdfPages": [
+    219,
+    227
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "福建永定县住宅(聚奎楼)外观",
+   "level": 0,
+   "startBlock": 580,
+   "endBlock": 588,
+   "chars": 184,
+   "bodyChars": 137,
+   "figures": 7,
+   "pdfPages": [
+    229,
+    233
+   ],
+   "printedPages": [
+    212,
+    215
+   ]
+  },
+  {
+   "title": "(中国营造学社莫宗江、陈明达与著者调查）",
+   "level": 0,
+   "startBlock": 588,
+   "endBlock": 619,
+   "chars": 5042,
+   "bodyChars": 4021,
+   "figures": 8,
+   "pdfPages": [
+    234,
+    251
+   ],
+   "printedPages": null
+  }
+ ],
+ "printedPageMapping": {
+  "8": -9,
+  "9": -8,
+  "10": -7,
+  "11": -6,
+  "12": 1,
+  "13": 2,
+  "14": 1,
+  "15": 2,
+  "16": 3,
+  "50": 33,
+  "60": 43,
+  "94": 77,
+  "135": 118,
+  "138": 121,
+  "168": 151,
+  "172": 155,
+  "188": 171,
+  "229": 212,
+  "232": 215
+ },
+ "note": ""
+}

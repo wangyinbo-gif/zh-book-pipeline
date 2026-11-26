@@ -1,0 +1,104 @@
+{
+ "book": "考工记",
+ "kind": "structure-only",
+ "sourceAuthor": "王安忆（2018 年长篇小说，作者在世）",
+ "sourceBookDir": "考工记 (王安忆) ",
+ "publicDomainStatus": "作品在版权保护期内，不得公开正文（方案 §二判定：内部使用 + 仅公开结构数据）。",
+ "containsBodyText": false,
+ "stats": {
+  "pages": 219,
+  "chars": 140498,
+  "paragraphs": 340,
+  "figures": 1,
+  "paired": 0,
+  "chapters": 6
+ },
+ "chapterTree": [
+  {
+   "title": "第一章",
+   "level": 0,
+   "startBlock": 0,
+   "endBlock": 66,
+   "chars": 22228,
+   "bodyChars": 19133,
+   "figures": 1,
+   "pdfPages": [
+    3,
+    39
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第二章",
+   "level": 0,
+   "startBlock": 66,
+   "endBlock": 123,
+   "chars": 23774,
+   "bodyChars": 20451,
+   "figures": 0,
+   "pdfPages": [
+    40,
+    75
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第三章",
+   "level": 0,
+   "startBlock": 123,
+   "endBlock": 175,
+   "chars": 22102,
+   "bodyChars": 19030,
+   "figures": 0,
+   "pdfPages": [
+    76,
+    108
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第四章",
+   "level": 0,
+   "startBlock": 175,
+   "endBlock": 242,
+   "chars": 28417,
+   "bodyChars": 24415,
+   "figures": 0,
+   "pdfPages": [
+    110,
+    152
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第五章",
+   "level": 0,
+   "startBlock": 242,
+   "endBlock": 294,
+   "chars": 21119,
+   "bodyChars": 18205,
+   "figures": 0,
+   "pdfPages": [
+    153,
+    184
+   ],
+   "printedPages": null
+  },
+  {
+   "title": "第六章 2018年5月12日完成于香港中文大学",
+   "level": 0,
+   "startBlock": 294,
+   "endBlock": 347,
+   "chars": 22858,
+   "bodyChars": 19626,
+   "figures": 0,
+   "pdfPages": [
+    186,
+    219
+   ],
+   "printedPages": null
+  }
+ ],
+ "printedPageMapping": {},
+ "note": ""
+}

@@ -34,3 +34,6 @@ reflow/
 # 样书生成的报告（可由 tools/proofread.py 重新生成）
 samples/**/校对清单.md
 samples/**/proofread.json
+
+# gh CLI 本地状态目录（2026-11-26 教训：勿入仓）
+.local/

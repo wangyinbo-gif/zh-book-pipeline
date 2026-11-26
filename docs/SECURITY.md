@@ -1,40 +1,70 @@
 # Security
 
-Status: **hardening in progress (ROADMAP)**. The server is a localhost-first tool; it is **not**
-designed to be exposed to the public internet without additional protection.
+Status: **v1.0.7 — unified session authentication shipped** (contract v1). The server remains
+localhost-first. It is **not** designed for direct public-internet exposure; LAN/reverse-proxy
+use must enable authentication and prefer HTTPS or a trusted VPN.
 
 ## Threat model
 
-- Default bind is `127.0.0.1`; the LAN mode (`平板访问.bat` sets `HOST=0.0.0.0`) intentionally
-  exposes the reader and progress/bookmark/practice write APIs to the local network.
-- The server stores user data (`data/progress.json`, `data/bookmarks.json`, `data/practice.json`)
-  and serves book content only from the `books/` directory.
+- Default bind `127.0.0.1` (open mode, no auth — the documented local default).
+- User data: `data/progress.json`, `data/bookmarks.json`, `data/practice.json`; book content
+  served only from `books/`. Reading is treated as sensitive too: book texts, personal notes,
+  progress and question banks are all behind the same gate when auth is enabled.
+- The former LAN helper script (`平板访问.bat`) was retired on 2026-11-26; remote reading is
+  expected via a static offline site instead of exposing `server.js`.
 
-## Hardening items (priority order)
+## Architecture of the protection (contract v1)
 
-Status update 2026-11-25 (v1.0.2): **P0 + P1 complete; P2 shipped** (opt-in `AUTH_TOKEN`
-gate for write APIs + `tools/test_server_security.js` wired into CI, 26 cases green locally
-and in a repo-shaped layout).
+- Single credential (`AUTH_TOKEN`) → server-side session → one global authorization gate for
+  **all** routes (API, assets, static pages), not per-route token checks.
+- `POST /api/auth/login` (timing-safe compare; `HttpOnly` `SameSite=Strict` cookie
+  `zhuxue_sid`, random 64-hex sid; response carries a 32-hex CSRF token; per-IP rate limit
+  10 failures/min → 429), `POST /api/auth/logout` (revokes session, clears cookie),
+  `GET /api/auth/status` (anonymous, returns only `{authed, mode, csrf?}`).
+- Sessions are in-memory with absolute expiry (`SESSION_TTL`, default 8h). Restart invalidates
+  all sessions. Single-process deployment only. Credentials never appear in logs.
+- Gate order (locked by tests): Host allow-list 400 → anonymous-path method binding 405 →
+  open-mode passthrough → unauthenticated: 401 for API, 302 to `/login.html?next=` for
+  navigational GET (Accept: text/html; next is same-origin validated) → authenticated writes:
+  CSRF token + Origin/Referer same-origin or 403 → business dispatch.
+- Static and asset handlers accept GET/HEAD only (else 405). Leading-slash variants are
+  normalized before classification so `//api/...` cannot slip the whitelist. PATCH counts as
+  a write method. Anonymous whitelist is exactly 5 entries (`/login.html`, three auth endpoints,
+  `/api/health` with a minimal `{ok, mode}` body).
+- **Host allow-list (anti DNS-rebinding, P0 fix, 2026-11-26)**: only loopback names, the bound
+  host and local interface addresses are accepted; custom domains/mDNS names must be declared
+  via `ALLOW_EXTRA_HOSTS` (comma-separated) or requests are rejected with 400 before any
+  session check.
 
-| Priority | Item | State |
-|---|---|---|
-| P0 | Request body size limit (memory DoS on `/api/*` writes) | **Fixed v1.0.1** — 256 KB cap, 413 |
-| P0 | Robust `decodeURIComponent` + top-level error handling | **Fixed v1.0.1** — 400 on illegal encoding |
-| P0 | Don't leak internal error messages to clients | **Fixed v1.0.1** — generic 500 text |
-| P1 | Field-level validation (bookId/chapter/page length & range) | **Fixed v1.0.2** — ids ≤120 & no separators/NUL, page numeric+bounded, chapter ≤200; invalid input never reaches disk |
-| P1 | Path traversal defense (asset sub-path + URL id + NUL) | **Fixed v1.0.2** — normalize + prefix + length checks + NUL rejection |
-| P2 | Lite auth for write APIs | **v1.0.2** — opt-in `AUTH_TOKEN` env; when set, non-GET `/api/*` requires `Authorization: Bearer`. Frontend does not send it yet: enabling in LAN mode blocks client writes with 401 (documented tradeoff) |
-| P2 | Security regression tests | **Fixed v1.0.2** — `node tools/test_server_security.js` in CI (413/400/403/401 + normal-flow no-regression), runs in isolated `BOOKROOT` temp dir |
+## Deployment modes
 
-`server.js` also gained a `BOOKROOT` env override (same convention as `tools/paths.py`):
-set it to serve library data from another directory; defaults to the repo root.
+- **A. Local (default)**: `node server.js` on 127.0.0.1; auth optional. Set `AUTH_TOKEN` to
+  require login; set `AUTH_ENFORCE=1` to force login on localhost (with an empty token the
+  server refuses to start, exit code 79, by design).
+- **B. LAN / behind a reverse proxy**: `AUTH_TOKEN` mandatory — non-loopback bind without a
+  token exits with code 78 and prints generation instructions (`crypto.randomBytes`). Prefer
+  HTTPS or a trusted VPN (plain HTTP LAN leaks credentials to same-network devices). With a
+  trusted proxy set `TRUST_PROXY=1` (only then is `X-Forwarded-Proto` honored and the `Secure`
+  cookie flag added). Never expose directly to the public internet.
 
-## Principles
+## Hardening history
 
-- Books data never enters public repos; `.gitignore` covers `books/`, `题库/`, `_dist/`, PDFs.
-- Path safety rule: `basename` + explicit prefix check before any `fs` read/write.
-- Atomic writes: every JSON write goes through `tmp` + `rename`.
-- If you must expose the server beyond localhost/LAN, add a reverse proxy with authentication
-  and rate limiting; do not run it directly on the internet.
+| Item | State |
+|---|---|
+| Body size limit / robust decoding / error text | Fixed v1.0.1 (413/400/generic 500) |
+| Field-level validation + path traversal (`withinDir` + realpath, P0-01) | Fixed v1.0.2 / v1.0.5 |
+| `AUTH_TOKEN` Bearer gate for write APIs | Superseded v1.0.7 by full session gate |
+| Unified session auth, CSRF, anonymous-path method binding | **v1.0.7** |
+| Host allow-list (DNS-rebinding) | **v1.0.7** |
+| Security regression suite R1–R22 | v1.0.7: 164 assertions green locally and in CI (one symlink case skips on Windows runners) |
 
-Details and the full remediation plan live in the private project docs (`安全修复方案.md`).
+## Known limitations (honest list)
+
+- With `TRUST_PROXY=1`, the login rate-limiter keys on the shared proxy IP.
+- In-memory sessions ⇒ single process; rolling restarts log users out.
+- `url.parse()` triggers a Node deprecation warning (DEP0169); do not migrate to WHATWG URL
+  without first porting the 12 path-variant regression cases (see the route matrix doc §3).
+- `/data` must never be served statically; it is outside the public root by construction.
+
+The full internal route inventory and gap audit (G1–G12) is tracked in private project docs;
+a public summary matrix lives in [docs/ROUTE-SECURITY-MATRIX.md](ROUTE-SECURITY-MATRIX.md).

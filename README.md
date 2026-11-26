@@ -83,6 +83,13 @@ node server.js        # http://127.0.0.1:4590
 
 `tools/paths.py` 定义路径约定：`BOOKROOT` 环境变量优先，未设置时取仓库根目录。
 
+## 部署与安全
+
+- 本机默认（模式 A）：`node server.js` 绑 127.0.0.1，可选登录。
+- 设 `AUTH_TOKEN` 即启用**统一会话认证**（v1.0.7）：全部页面/接口/资源同一 gate，登录颁发 HttpOnly 会话 Cookie + CSRF 令牌，写请求校验来源与 Host 白名单（防 DNS rebinding）。
+- 局域网/反代（模式 B）：必须带 token（否则拒绝启动，退出码 78），建议 HTTPS 或可信 VPN；自定义域名需 `ALLOW_EXTRA_HOSTS`，反代 `TRUST_PROXY=1`。
+- 安全测试 R1-R22 已入 CI（164 断言）；细节见 [docs/SECURITY.md](docs/SECURITY.md) 与 [docs/ROUTE-SECURITY-MATRIX.md](docs/ROUTE-SECURITY-MATRIX.md)。
+
 ## 数据说明
 
 - 仓库**不含任何真实书籍正文、插图或 PDF**；`samples/demo-book` 为自制样书。

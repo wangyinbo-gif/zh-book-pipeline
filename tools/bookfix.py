@@ -12,6 +12,31 @@ import sys
 
 CHAP_RE = re.compile(r"^第\s?([0-9一二三四五六七八九十百零两]+)\s?([篇章])")
 
+# ---- 目录判据：反目录证据（内容表 / 术语表否决）词表与正则 ----
+# 真目录特征：条目名短 + 点线引导符 + 行尾页码；正文制度表/术语表（如营造法式「制度」
+# 「腰串：每间广一尺,即长四寸六分。」）特征：度量/工艺词、长句、行末句号、无行尾页码。
+# 保守方向：宁可漏删真目录（尚有人工兜底），不可误删正文（静默丢失）。
+_TOC_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+# 点线引导符：≥4 个连续分隔/空白字符（⋯ … · 冒号串 点串 破折号串 等）
+_TOC_LEADER_RE = re.compile(r"[：:，,。.．…·、\-–—_\s]{4,}")
+_TOC_NUM_RE = re.compile(r"[\d\s\.\-–—…·]+")
+# 行尾页码：阿拉伯/全角数字（可带括号），或古籍中文数字页码
+_TOC_PAGEEND_RE = re.compile(r"[\(（]?[０-９\d]{1,5}[\)）]?\s*$")
+_TOC_CJKPAGEEND_RE = re.compile(r"[〇零一二三四五六七八九十百千两]{1,6}\s*$")
+_TOC_SENT_RE = re.compile(r"[。！？!?；;]")
+# 度量/工艺词：仅取强指向「规限制法」的维度词、单位与专词；
+# 泛字（分/步/间/柱/版/作/造）易误伤古籍条目名，故不计入否决触发。
+_TOC_CRAFT_WORDS = ("长", "長", "广", "廣", "高", "厚", "寸", "尺", "丈", "厘", "釐",
+                    "随", "隨", "视", "視", "同上", "之制", "之製", "积而为法", "積而為法", "定法")
+_TOC_SHORT_MAXLEN = 22      # 短行的字符上限（含标点）
+_TOC_SHORT_RATIO = 0.6      # 短行率达标线（沿用原判据）
+_TOC_CRAFT_RATIO = 0.25     # (a) 度量/工艺词行占比 ≥25% → 反目录
+_TOC_LONG_MINLEN = 20       # (b) 长行判定的 CJK 字数下限
+_TOC_LONG_RATIO = 0.15      # (b) ≥20 字长行占比 ≥15% 且无页码/点线证据 → 反目录
+_TOC_PROSE_MINLEN = 12      # (c) 散文句式行的 CJK 字数下限
+_TOC_PROSE_RATIO = 0.15     # (c) 句末标点的长句行占比 ≥15% 且无页码/点线证据 → 反目录
+_TOC_MARK_RATIO = 0.30      # 页码/点线证据行占比；≥此值视为具备目录特征，不施 (b)(c) 否决
+
 
 def clean_title(name):
     if not name:
@@ -24,8 +49,64 @@ def clean_title(name):
     return name or name
 
 
+def _page_toc_evidence(texts):
+    """统计一页文本行的目录 / 反目录证据指标，供 detect_toc_pages 否决使用。
+
+    返回各项占比：
+    - short:   短行率（≤22 字 / 纯数字符号 / 含点线引导符 → 视为目录式短行）
+    - long:    CJK 字数 ≥20 的长行占比（目录页几乎无长行）
+    - craft:   含度量/工艺词的行的占比（制度表 / 术语表强特征）
+    - tocmark: 含点线引导符或行尾页码的行的占比（真目录的正面证据）
+    - prose:   句末标点 + CJK≥12 的叙述性长行占比（正文段落强特征）
+    """
+    n = len(texts)
+    if n == 0:
+        return {"n": 0, "short": 0.0, "long": 0.0, "craft": 0.0, "tocmark": 0.0, "prose": 0.0}
+    short = longn = craft = leader = pgnum = prose = 0
+    for t in texts:
+        ts = t.strip()
+        has_leader = bool(_TOC_LEADER_RE.search(ts))
+        if len(ts) <= _TOC_SHORT_MAXLEN or _TOC_NUM_RE.fullmatch(ts) or has_leader:
+            short += 1
+        ncjk = len(_TOC_CJK_RE.findall(ts))
+        if ncjk >= _TOC_LONG_MINLEN:
+            longn += 1
+        if any(w in ts for w in _TOC_CRAFT_WORDS):
+            craft += 1
+        if has_leader:
+            leader += 1
+        if _TOC_PAGEEND_RE.search(ts) or _TOC_CJKPAGEEND_RE.search(ts):
+            pgnum += 1
+        if _TOC_SENT_RE.search(ts) and ncjk >= _TOC_PROSE_MINLEN:
+            prose += 1
+    return {"n": n, "short": short / n, "long": longn / n, "craft": craft / n,
+            "tocmark": min(1.0, (leader + pgnum) / n), "prose": prose / n}
+
+
+def _is_anti_toc(ev):
+    """反目录证据否决：命中任一「内容表/术语表」特征即判定该页不是目录页。
+
+    (a) 度量/工艺词行占比 ≥25%；
+    (b) 或（无足量页码/点线证据 且 ≥20 字长行占比 ≥15%）；
+    (c) 或（无足量页码/点线证据 且 叙述性长句行占比 ≥15%）。
+    注：(b)(c) 仅在 tocmark<30%（缺目录正面证据）时生效，避免误伤
+        「条目 + 点线 + 中文页码」这类古籍真目录形态。
+    """
+    if ev["craft"] >= _TOC_CRAFT_RATIO:
+        return True
+    if ev["tocmark"] < _TOC_MARK_RATIO and (
+            ev["long"] >= _TOC_LONG_RATIO or ev["prose"] >= _TOC_PROSE_RATIO):
+        return True
+    return False
+
+
 def detect_toc_pages(blocks):
-    """目录页特征：短行/纯数字为主，或者一页里塞了很多「第N章」标题。"""
+    """目录页特征：短行/纯数字为主，或者一页里塞了很多「第N章」标题。
+
+    短行率达标只是候选，还要过 _is_anti_toc 反目录证据否决：含度量/工艺词、
+    或（无页码/点线证据且）长行/叙述句偏多的页面（如营造法式「制度」正文表）
+    一律不判目录页，避免整页误删正文。
+    """
     by_page = {}
     heads = {}
     chars = {}
@@ -45,12 +126,9 @@ def detect_toc_pages(blocks):
     for pg, texts in by_page.items():
         if len(texts) < 8:
             continue
-        short = 0
-        for t in texts:
-            t = t.strip()
-            if len(t) <= 22 or re.fullmatch(r"[\d\s\.\-–—…·]+", t):
-                short += 1
-        if short / len(texts) >= 0.6:
+        ev = _page_toc_evidence(texts)
+        # 短行率达标 → 目录候选；再施反目录证据否决，挡下制度表/术语表这类正文页
+        if ev["short"] >= _TOC_SHORT_RATIO and not _is_anti_toc(ev):
             toc.append(pg)
     for pg, n in heads.items():
         if n >= 3 and chars.get(pg, 0) < 900:

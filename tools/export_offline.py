@@ -518,7 +518,20 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='只统计，不写盘')
     ap.add_argument('--no-assets', action='store_true', help='不复制图片（调试用）')
     ap.add_argument('--zip', action='store_true', help='导出后顺带打 zip（同目录，含 .sha256.txt）')
+    ap.add_argument('--release-preflight', action='store_true', help='检查历史卡点后退出，不生成离线包')
     args = ap.parse_args()
+    if args.release_preflight or not args.dry_run:
+        from repair_preflight import release_holds
+        try:
+            held = release_holds()
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            ap.exit(2, 'STOP 发布台账无法校验：%s\n' % e)
+        if held:
+            detail = '\n'.join(f'- {name}：{status}' for name, status in held.items())
+            ap.exit(2, 'STOP 离线发布存在尚未核清的历史书稿：\n' + detail + '\n')
+        if args.release_preflight:
+            print('PASS 离线发布历史阻断台账')
+            return
     report = build(args.out, copy=args.copy, dry_run=args.dry_run, no_assets=args.no_assets)
     if args.zip and not args.dry_run:
         make_zip(report['out'])

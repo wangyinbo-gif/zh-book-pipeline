@@ -1,6 +1,6 @@
 # Security
 
-Status: **v1.0.7 — unified session authentication shipped** (contract v1). The server remains
+Status: **v1.1.0 — unified session authentication + gated full-text search** (contract v1). The server remains
 localhost-first. It is **not** designed for direct public-internet exposure; LAN/reverse-proxy
 use must enable authentication and prefer HTTPS or a trusted VPN.
 
@@ -58,7 +58,8 @@ Full-text search (v1.1.0). `/api/search` rides the same gate — deliberately ab
 | `AUTH_TOKEN` Bearer gate for write APIs | Superseded v1.0.7 by full session gate |
 | Unified session auth, CSRF, anonymous-path method binding | **v1.0.7** |
 | Host allow-list (DNS-rebinding) | **v1.0.7** |
-| Security regression suite R1–R22 | v1.0.7: 164 assertions green locally and in CI (one symlink case skips on Windows runners) |
+| Gated full-text search `/api/search` (401 unauthenticated; API paths never 302; R23/R24) | **v1.1.0** |
+| Security regression suite R1–R24 | **v1.1.0: 171 assertions** green locally and in CI (one symlink case skips on Windows runners) |
 
 ## Known limitations (honest list)
 

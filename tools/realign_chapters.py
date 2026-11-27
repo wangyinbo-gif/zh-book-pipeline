@@ -7,9 +7,52 @@
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+
+
+def read_bytes(path):
+    with open(path, "rb") as stream:
+        return stream.read()
+
+
+def detect_json_format(raw):
+    """B7：探测 book.json 现有的换行与缩进口径（按字节判，不用文本模式数 \\r）。
+
+    返回 {"newline": "\\r\\n"|"\\n", "indent": int|None, "crlf": n, "lf": n, "compact": bool}
+    indent=None 表示单行紧凑（json.dumps 不带 indent）。
+    """
+    crlf = raw.count(b"\r\n")
+    lf = raw.count(b"\n") - crlf
+    newline = "\r\n" if crlf > lf else "\n"
+    text = raw.decode("utf-8-sig", "replace")
+    lines = text.split("\n")
+    indent, compact = None, len([x for x in lines if x.strip()]) <= 1
+    if not compact:
+        for line in lines[1:8]:
+            m = re.match(r"^([ \t]+)\S", line)
+            if m:
+                g = m.group(1)
+                indent = "\t" if g[0] == "\t" else len(g)
+                break
+        if indent is None:
+            indent = 2
+    return {"newline": newline, "indent": indent, "crlf": crlf, "lf": lf, "compact": compact}
+
+
+def dump_json_preserving(obj, fmt):
+    """按探测到的口径序列化；只改内容，不改换行与缩进。"""
+    ind = fmt.get("indent")
+    if fmt.get("compact") or ind is None:
+        s = json.dumps(obj, ensure_ascii=False)
+    else:
+        s = json.dumps(obj, ensure_ascii=False, indent=ind)
+    nl = fmt.get("newline", "\n")
+    if nl != "\n":
+        s = s.replace("\n", nl)
+    return s
 
 B = str(Path(__file__).resolve().parents[1] / "books")
 
@@ -37,17 +80,34 @@ def realign(book_dir, verbose=False):
         book = json.load(stream)
     if not book.get("chapters"):
         return 0
+    raw_before = read_bytes(bj)
+    fmt = detect_json_format(raw_before)
     fallback = realign_book(book)
-    with NamedTemporaryFile(mode="w", encoding="utf-8", dir=book_dir, delete=False) as stream:
+    payload = dump_json_preserving(book, fmt)
+    with NamedTemporaryFile(mode="wb", dir=book_dir, delete=False) as stream:
         temporary = stream.name
         try:
-            json.dump(book, stream, ensure_ascii=False, indent=1)
-            stream.close()
+            stream.write(payload.encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+            stream.close()          # Windows：不先关句柄，os.replace 会被占用
             os.replace(temporary, bj)
         finally:
-            Path(temporary).unlink(missing_ok=True)
+            if os.path.exists(temporary):
+                Path(temporary).unlink(missing_ok=True)
+    # 写后自证：语义等价 + 格式零漂移（B7 验收）
+    raw_after = read_bytes(bj)
+    fmt_after = detect_json_format(raw_after)
+    if json.loads(raw_after.decode("utf-8-sig")) != book:
+        raise SystemExit("写后自证失败：内容与内存对象不一致")
+    for k in ("newline", "indent", "compact"):
+        if fmt[k] != fmt_after[k]:
+            raise SystemExit("写后自证失败：格式漂移 %s %r → %r" % (k, fmt[k], fmt_after[k]))
     if verbose:
-        print("  %-24s 章%-3d 回退定位 %d" % (os.path.basename(book_dir)[:22], len(book["chapters"]), fallback))
+        print("  %-24s 章%-3d 回退定位 %d ｜ 格式保持 %s indent=%s 字节 %d→%d"
+              % (os.path.basename(book_dir)[:22], len(book["chapters"]), fallback,
+                 "CRLF" if fmt["newline"] == "\r\n" else "LF", fmt["indent"],
+                 len(raw_before), len(raw_after)))
     return fallback
 
 

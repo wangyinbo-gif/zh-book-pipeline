@@ -30,7 +30,11 @@ fixfile 结构：
   - 改完必须跑：realign_chapters.py（章边界）→ pipeline.py recheck → proofread.py
   - 若该书有题库：块数一变就要 qbank.py reanchor，别裸改
 """
+import argparse
+from copy import deepcopy
 import json
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 import hashlib
 import os
 import re
@@ -38,6 +42,10 @@ import shutil
 import sys
 import time
 from collections import Counter
+
+import repair_preflight
+from pipeline import count_chars
+from realign_chapters import check_bounds, realign_book
 
 HAN = re.compile(r"[\u4e00-\u9fff]")
 
@@ -58,27 +66,50 @@ def bag(blocks):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: python tools/page_surgery.py fixfile.json")
+    parser = argparse.ArgumentParser(description="逐页书稿修复")
+    parser.add_argument("plan")
+    parser.add_argument("--describe", action="store_true", help="输出供审核的完整变更回执，不写书稿")
+    parser.add_argument("--approval", help="主库写盘的逐批批准回执")
+    args = parser.parse_args()
+    try:
+        return run_plan(args)
+    except (OSError, ValueError, KeyError, TypeError, AssertionError) as e:
+        print("STOP:", e, file=sys.stderr)
         return 1
-    with open(sys.argv[1], encoding="utf-8-sig") as source:
-        fix = json.load(source)
+
+
+def run_plan(args):
+    plan_bytes = Path(args.plan).read_bytes()
+    fix = json.loads(plan_bytes.decode("utf-8-sig"))
     d = fix.get("book_dir")
-    assert d and os.path.exists(os.path.join(d, "book.json")), "fixfile 的 book_dir 无效"
+    if not d:
+        raise ValueError("计划缺少书目录")
     fp = os.path.join(d, "book.json")
+    raw = Path(fp).read_bytes()
+    before = json.loads(raw.decode("utf-8-sig"))
+    actual = repair_preflight.digest(raw)
     expected = fix.get("expected_book_sha256")
-    if expected:
-        with open(fp, "rb") as source:
-            actual = hashlib.sha256(source.read()).hexdigest()
-        if actual != expected:
-            raise SystemExit("书稿已变化，计划失效；请重新核对并重新生成计划")
-    with open(fp, encoding="utf-8-sig") as source:
-        book = json.load(source)
-    amend(book, fix)
-    if not fix.get("apply"):
-        print("（未写盘：fixfile 无 apply:true）")
+    if expected and actual != expected:
+        raise ValueError("书稿已变化，计划失效")
+    book = deepcopy(before)
+    retained = amend(book, fix)
+    applying = bool(fix.get("apply")) and not args.describe
+    guarded = applying and repair_preflight.is_live(d)
+    if args.describe or guarded:
+        if guarded and not expected:
+            raise ValueError("主库计划必须填写改前书稿 SHA-256")
+        if realign_book(book):
+            raise ValueError("章锚点出现回退，需核实后重新提交计划")
+        check_bounds(book)
+        receipt = repair_preflight.describe(d, raw, before, book, plan_bytes, retained)
+        if args.describe:
+            print(json.dumps(receipt, ensure_ascii=False, indent=2))
+        if guarded:
+            repair_preflight.require_approval(args.approval, receipt)
+    if not applying:
+        print("（预演，未写盘）")
         return 0
-    return write_book(d, fp, book, expected)
+    return write_book(d, fp, book, actual)
 
 
 def amend(book, fix):
@@ -141,12 +172,8 @@ def amend(book, fix):
           "".join(k * v for k, v in sorted(added.items()))[:120])
     if removed:
         print("!! 有删除：请逐字确认只是去重/错字替换，不是丢正文")
-    def count_chars(bks):
-        return sum(len(block_text(b)) for b in bks
-                   if b.get("type") in ("paragraph", "heading", "table"))
-
     stats = book.setdefault("stats", {})
-    stats["chars"] = count_chars(blocks)
+    stats["chars"] = count_chars(book)
     stats["paragraphs"] = sum(1 for b in blocks if b["type"] == "paragraph")
     figs = [b for b in blocks if b["type"] == "figure"]
     stats["figures"] = len(figs)
@@ -156,10 +183,9 @@ def amend(book, fix):
 
 
 def write_book(d, fp, book, expected):
-    if expected:
-        with open(fp, "rb") as source:
-            if hashlib.sha256(source.read()).hexdigest() != expected:
-                raise SystemExit("写入前发现书稿已变化；请重新核对并重新生成计划")
+    raw = Path(fp).read_bytes()
+    if expected and hashlib.sha256(raw).hexdigest() != expected:
+        raise ValueError("写入前发现书稿已变化；请重新核对并重新生成计划")
     base = os.path.join(d, "book.json.bak_%s_手术批" % time.strftime("%Y%m%d_%H%M%S"))
     bak = base
     suffix = 1
@@ -167,13 +193,21 @@ def write_book(d, fp, book, expected):
         bak = "%s_%d" % (base, suffix)
         suffix += 1
     # Exclusive creation prevents another process from silently replacing a backup.
-    with open(fp, "rb") as source, open(bak, "xb") as target:
-        shutil.copyfileobj(source, target)
+    with open(bak, "xb") as target:
+        target.write(raw)
     shutil.copystat(fp, bak)
-    tmp = fp + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(book, f, ensure_ascii=False)
-    os.replace(tmp, fp)
+    with NamedTemporaryFile(mode="wb", dir=d, prefix=".surgery-", delete=False) as target:
+        tmp = Path(target.name)
+        try:
+            target.write(repair_preflight.encoded_book(book, raw))
+            target.flush()
+            os.fsync(target.fileno())
+            target.close()
+            if Path(fp).read_bytes() != raw:
+                raise ValueError("写回之前书稿发生变化")
+            os.replace(tmp, fp)
+        finally:
+            tmp.unlink(missing_ok=True)
     print("已写回；备份", os.path.basename(bak),
           "| blocks", len(book["blocks"]), "chars", book["stats"]["chars"],
           "图", book["stats"]["figures"], "配注", book["stats"]["paired"])

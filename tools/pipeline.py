@@ -145,20 +145,39 @@ def convert_vertical(pdf, book_dir, title, book_name, scale, fp, ears="", model=
     return run(cmd, fp)
 
 
+# 后处理阶段 → 脚本与参数（抽成数据，便于单测 argv 组装）
+STAGE_SCRIPTS = {
+    "bookfix": ("bookfix.py", ["book.json"]),
+    "postfix": ("postfix_book.py", []),
+    "readability": ("fix_readability.py", []),
+    "toc": ("rebuild_toc.py", []),
+    "dims": ("add_dims.py", []),
+    "proofread": ("proofread.py", []),
+    "captions": ("fix_unpaired_captions.py", []),
+    "cleanfigs": ("clean_watermark_images.py", []),
+    "headertoc": ("toc_from_headers.py", []),
+    "captionfix": ("fix_captions.py", []),
+    "chapters2": ("c1_chapters.py", []),
+}
+
+# B5（2026-11-27）配套：fix_unpaired_captions.py 改成「默认只预演、--apply 才写盘」。
+# 流水线里的 captions 阶段是明确的授权写盘动作，所以由流水线显式补 --apply；
+# 人工在命令行单独调用时仍是 dry-run，避免「一跑就改稿」。
+APPLY_REQUIRED = {"fix_unpaired_captions.py"}
+
+
+def stage_cmd(stage, book_dir):
+    """返回某个后处理阶段的完整 argv（纯函数，供单测）。"""
+    name, extra = STAGE_SCRIPTS[stage]
+    args = [os.path.join(book_dir, e) if e == "book.json" else book_dir for e in extra]
+    if not extra:
+        args = [book_dir]
+    if name in APPLY_REQUIRED:
+        args = args + ["--apply"]
+    return [PY, os.path.join(TOOLS, name)] + args
+
+
 def post_stage(stage, book_dir, fp):
-    scripts = {
-        "bookfix": ("bookfix.py", ["book.json"]),
-        "postfix": ("postfix_book.py", []),
-        "readability": ("fix_readability.py", []),
-        "toc": ("rebuild_toc.py", []),
-        "dims": ("add_dims.py", []),
-        "proofread": ("proofread.py", []),
-        "captions": ("fix_unpaired_captions.py", []),
-        "cleanfigs": ("clean_watermark_images.py", []),
-        "headertoc": ("toc_from_headers.py", []),
-        "captionfix": ("fix_captions.py", []),
-        "chapters2": ("c1_chapters.py", []),
-    }
     if stage == "preview":
         log("  生成翻页预览 preview.html", fp)
         # 用当前 book.json 重建预览
@@ -168,11 +187,7 @@ def post_stage(stage, book_dir, fp):
             "build_preview(b,os.path.join(%r,'preview.html'))" % (TOOLS, book_dir, book_dir)
         )
         return run([PY, "-c", code], fp, quiet=True)
-    name, extra = scripts[stage]
-    args = [os.path.join(book_dir, e) if e == "book.json" else book_dir for e in extra]
-    if not extra:
-        args = [book_dir]
-    return run([PY, os.path.join(TOOLS, name)] + args, fp)
+    return run(stage_cmd(stage, book_dir), fp)
 
 
 
@@ -380,6 +395,53 @@ def structure_diag(book):
             "chars": count_chars(book)}
 
 
+def p0_block_pages(block):
+    listed = block.get("pages")
+    candidates = listed if isinstance(listed, list) else []
+    return {n for n in [block.get("page"), *candidates] if type(n) is int and n > 0}
+
+
+def p0_grams(text):
+    return [text[i:i + 4] for i in range(len(text) - 3)]
+
+
+def p0_source_counts(blocks, source_text, han):
+    """Allocate only unambiguous evidence in multi-page blocks, once per character."""
+    counts = {}
+    unresolved = 0
+    page_grams = {}
+
+    def index(page):
+        if page not in page_grams:
+            page_grams[page] = set(p0_grams(han(source_text.get(page, ""))))
+        return page_grams[page]
+
+    for block in blocks:
+        text = han(block_text(block))
+        pages = p0_block_pages(block)
+        if len(pages) <= 1:
+            if pages:
+                p, = pages
+                counts[p] = counts.get(p, 0) + len(text)
+            else:
+                unresolved += len(text)
+            continue
+        owners = [set() for char in text]
+        for i, gram in enumerate(p0_grams(text)):
+            matches = [p for p in pages if gram in index(p)]
+            if len(matches) == 1:
+                p, = matches
+                for pos in range(i, i + 4):
+                    owners[pos].add(p)
+        for possible in owners:
+            if len(possible) == 1:
+                p, = possible
+                counts[p] = counts.get(p, 0) + 1
+            else:
+                unresolved += 1
+    return counts, unresolved
+
+
 def textcheck(book_dir):
     """文字层体检（只诊断，不计入门槛）：找出「结构对但文字错」的问题。
 
@@ -404,9 +466,6 @@ def textcheck(book_dir):
 
     def han_only(s):
         return "".join(HAN.findall(s or ""))
-
-    def chunks4(s):
-        return [s[i:i + 4] for i in range(0, max(1, len(s) - 3), 4)]
 
     def cover(chs, hay):
         if not chs:
@@ -440,7 +499,9 @@ def textcheck(book_dir):
     cache = load_ocr_pages(book_dir)
     ocr_by_page = {p: [str(line["text"]).strip() for line in lines if line.get("text")]
                    for p, (_, lines) in cache.items()}
-    book_pages = {b["page"] for b in blocks if type(b.get("page")) is int}
+    book_pages = set().union(*(p0_block_pages(block) for block in blocks))
+    out["diagnosticVersion"] = "p0-sliding4-pages-v1"
+    out["short_continuation_candidates"] = []
     count = (book.get("stats") or {}).get("pages")
     expected = set(range(1, count + 1)) if type(count) is int else set()
     out["missing_cache_pages"] = sorted((expected | book_pages) - cache.keys())
@@ -457,31 +518,32 @@ def textcheck(book_dir):
         if not text:
             continue
         all_text.append(text)
-        pages = block.get("pages")
-        pages = {page for page in pages if type(page) is int} if isinstance(pages, list) else set()
-        pages.add(block.get("page"))
-        for page in pages:
-            if type(page) is int:
-                text_by_page.setdefault(page, []).append(text)
+        for page in p0_block_pages(block):
+            text_by_page.setdefault(page, []).append(text)
     text_by_page = {page: "".join(texts) for page, texts in text_by_page.items()}
 
     head_pat = re.compile(r"^(公共建筑设计原理|第\s?\d+\s?章)")
 
-    all_text = "".join(all_text)
     all_chunks = None
     front_pat = re.compile(r"^(上架建议|ISBN|图书在版编目|责任编辑|版权所有|定价|出版发行|全国百佳|如有印装)")
     for p, lines in ocr_by_page.items():
         current = text_by_page.get(p, "")
         nearby = {page: text_by_page.get(page, "") for page in range(p - 3, p + 4) if page != p}
-        for ln in lines:
+        for i, ln in enumerate(lines):
             if head_pat.match(ln) or front_pat.match(ln) or re.match(r"^图\s*\d", ln):
                 continue
             if has_watermark(ln):  # 扫描版夹带的广告贴纸文字，不算书稿内容
                 continue
             h = han_only(ln)
+            if 4 <= len(h) <= 12:
+                out["short_continuation_candidates"].append(
+                    {"page": p, "line": i + 1, "text": ln, "han": len(h),
+                     "previous": lines[i - 1] if i else None,
+                     "next": lines[i + 1] if i + 1 < len(lines) else None,
+                     "status": "review", "matched_on_page": h in current})
             if len(h) < 10:
                 continue
-            chunks = chunks4(h)
+            chunks = p0_grams(h)
             if cover(chunks, current) >= 0.5:
                 continue
             matched_pages = [page for page, text in nearby.items() if cover(chunks, text) >= 0.8]
@@ -489,7 +551,7 @@ def textcheck(book_dir):
                 out["other_page_lines"].append((p, ln[:46], matched_pages))
                 continue
             if all_chunks is None:
-                all_chunks = set(chunks4(all_text)) if len(all_text) >= 4 else set()
+                all_chunks = {g for text in all_text for g in p0_grams(text)}
             if cover(chunks, all_chunks) < 0.5:
                 out["lost_lines"].append((p, ln[:46]))
             else:
@@ -536,12 +598,11 @@ def page_coverage(book_dir, min_ocr_han=60, low_ratio=0.60, win_ratio=0.80,
         res["note"] = "OCR 行太少（无可用页码）"
         return res
 
-    by_page = {}
-    for b in book.get("blocks") or []:
-        pg = b.get("page")
-        if pg is None:
-            continue
-        by_page[pg] = by_page.get(pg, 0) + hz(block_text(b))
+    by_page, unattributed = p0_source_counts(
+        book.get("blocks") or [], ocr_text, lambda s: "".join(han.findall(s or "")))
+    res["sourceAttributedChars"] = sum(by_page.values())
+    res["sourceUnattributedChars"] = unattributed
+    res["diagnosticVersion"] = "p0-sliding4-pages-v1"
 
     best_o, best_score = 0, -1.0
     tot_ocr = sum(ocr[p] for p in cand)
@@ -568,13 +629,13 @@ def page_coverage(book_dir, min_ocr_han=60, low_ratio=0.60, win_ratio=0.80,
     if not starts:
         starts = [b.get("page") for b in (book.get("blocks") or []) if isinstance(b.get("page"), int)]
     body_start = min(starts) if starts else 1
-    fig_pages = set(b.get("page") for b in (book.get("blocks") or [])
-                    if b.get("type") == "figure" and isinstance(b.get("page"), int))
+    fig_pages = set().union(*(p0_block_pages(b) for b in book.get("blocks") or []
+                              if b.get("type") == "figure"))
     plate_book = median < 0.35          # 整页图版型：书稿本来就不承载这一页的文字
     book_han = "".join(han.findall("".join(block_text(b) for b in (book.get("blocks") or []))))
     # 正文最后一页（用于判断「正文之后的附页」）
-    body_pages = [b.get("page") for b in (book.get("blocks") or [])
-                  if b.get("type") in ("paragraph", "heading") and isinstance(b.get("page"), int)]
+    body_pages = set().union(*(p0_block_pages(b) for b in book.get("blocks") or []
+                               if b.get("type") in ("paragraph", "heading")))
     last_body_page = max(body_pages) if body_pages else 0
     BACKMATTER = re.compile(r"索引|图录|参考文献|编者的话|附录|目录|插图索引|图片索引|作者索引|评注|凡例")
 
@@ -744,10 +805,13 @@ def build_recheck(book_dir):
                       "missingCachePages": tc["missing_cache_pages"],
                       "noBlockPages": tc["no_block_pages"],
                       "legacyCachePages": tc["legacy_cache_pages"],
+                      "diagnosticVersion": tc["diagnosticVersion"],
+                      "shortContinuationCandidates": len(tc["short_continuation_candidates"]),
                       "lostRate": round(lost / float(ocr_lines), 4) if ocr_lines else 0.0,
                       "samples": [{"page": p, "text": t} for p, t in tc["lost_lines"][:8]]},
         "coverage": {k: cov.get(k) for k in ("pages", "offset", "median",
-                                             "lowCount", "lowHard", "low", "note")},
+                                              "lowCount", "lowHard", "low", "note",
+                                              "diagnosticVersion", "sourceAttributedChars", "sourceUnattributedChars")},
     }
 
 
@@ -767,6 +831,9 @@ def render_recheck(data):
     lines.append("")
     lines.append("- 文字层 textcheck：碎片块 %d · 极短块 %d · 长句旁注 %d · **OCR 行丢失 %d**（丢行率 %.2f%%）"
                  % (tc["frag"], tc["tiny"], tc["longnote"], tc["lost_lines"], tc["lostRate"] * 100))
+    if tc.get("diagnosticVersion"):
+        lines.append("- 诊断口径：%s；4–12 字短行参考候选 %s" %
+                     (tc["diagnosticVersion"], tc.get("shortContinuationCandidates", 0)))
     lines.append("- 原页诊断（候选）：缺 OCR 缓存 %d 页 · 有缓存但无书稿块 %d 页 · 异页文字线索 %d 行"
                  % (len(tc.get("missingCachePages", [])), len(tc.get("noBlockPages", [])), tc.get("otherPageLines", 0)))
     if cov.get("pages"):

@@ -40,6 +40,120 @@ def hz(t):
     return len(HAN.findall(t or ""))
 
 
+def chars_of(blocks):
+    """B1：字数一律走 pipeline.count_chars（paragraph+heading+table，表格含表头与单元格）。
+    旧写法只数 paragraph，写回就把 stats.chars 少算 2000+ 字，当场制造「字段陈旧」。"""
+    return pipeline.count_chars({"blocks": blocks})
+
+
+def read_bytes(path):
+    with open(path, "rb") as stream:
+        return stream.read()
+
+
+def detect_json_format(raw):
+    """探测现有 book.json 的换行/缩进口径（同 B7：写回不许顺手统一格式）。"""
+    crlf = raw.count(b"\r\n")
+    lf = raw.count(b"\n") - crlf
+    newline = "\r\n" if crlf > lf else "\n"
+    text = raw.decode("utf-8-sig", "replace")
+    lines = text.split("\n")
+    indent, compact = None, len([x for x in lines if x.strip()]) <= 1
+    if not compact:
+        for line in lines[1:8]:
+            m = re.match(r"^([ \t]+)\S", line)
+            if m:
+                indent = "\t" if m.group(1)[0] == "\t" else len(m.group(1))
+                break
+        if indent is None:
+            indent = 2
+    return {"newline": newline, "indent": indent, "crlf": crlf, "lf": lf, "compact": compact}
+
+
+def dump_json_preserving(obj, fmt):
+    ind = fmt.get("indent")
+    if fmt.get("compact") or ind is None:
+        out = json.dumps(obj, ensure_ascii=False)
+    else:
+        out = json.dumps(obj, ensure_ascii=False, indent=ind)
+    nl = fmt.get("newline", "\n")
+    if nl != "\n":
+        out = out.replace("\n", nl)
+    return out
+
+
+def order_key(p):
+    return (p.get("page") or 0, p.get("col") or 0, p.get("y") or 0)
+
+
+def merge_plans(plans, blocks, page_slack=1):
+    """B4：同一区域（同目标块）的多片段按「来源页 + 原页行序」合成一条计划，再一次落块。
+
+    - 同 (op, idx) 合并成一条：片段按 (page, col, y) 排序拼接，重复片段（含目标块已有的整行）丢弃；
+    - 同一块被两种以上操作命中（append/prepend/splice 混来）→ 不猜顺序，整组挂起待人工；
+    - 来源页与目标块页差超过 page_slack → 判为跨页粘连（建筑语汇 p173 标签粘到 p171 段落那类），挂起。
+    返回 (merged, held)。
+    """
+    by_target = {}
+    ops_of_idx = {}
+    for p in plans:
+        by_target.setdefault((p["op"], p.get("idx")), []).append(p)
+        ops_of_idx.setdefault(p.get("idx"), set()).add(p["op"])
+    merged, held = [], []
+    for (op, idx) in sorted(by_target, key=lambda k: (k[1] if k[1] is not None else 10 ** 9, k[0])):
+        group = sorted(by_target[(op, idx)], key=order_key)
+        b = blocks[idx] if isinstance(idx, int) and 0 <= idx < len(blocks) else None
+        cur = (b.get("text") or "") if b else ""
+        if len(ops_of_idx.get(idx, set())) > 1:
+            held.append({"reason": "同块多操作冲突：%s" % "/".join(sorted(ops_of_idx[idx])),
+                         "idx": idx, "count": len(group)})
+            continue
+        if op == "splice":
+            seen = set()
+            for p in sorted(group, key=lambda x: x.get("a", 0)):
+                if p["text"] in seen or p["text"] in cur:
+                    continue
+                seen.add(p["text"])
+                merged.append(dict(p))
+            continue
+        pg_b = b.get("page") if b else None
+        bad, keep = [], []
+        for p in group:
+            if isinstance(pg_b, int) and isinstance(p.get("page"), int) and abs(p["page"] - pg_b) > page_slack:
+                bad.append(p)
+            else:
+                keep.append(p)
+        if bad:
+            held.append({"reason": "跨页粘连：片段页 %s → 目标块页 %s（差 >%d）"
+                         % (",".join(str(x["page"]) for x in bad), pg_b, page_slack),
+                         "idx": idx, "count": len(bad)})
+        texts, seen = [], set()
+        for p in keep:
+            if p["text"] in seen or p["text"] in cur:
+                continue
+            seen.add(p["text"])
+            texts.append(p["text"])
+        if not texts:
+            continue
+        if op == "insert":
+            # 每个片段自成一段（build_plan 已按行距把同一行的连续片段并成一组），
+            # 这里只去重、按行序保留，绝不把不同段粘成一块。
+            for p in keep:
+                if p["text"] in seen:
+                    merged.append(dict(p, fragments=0))
+                    seen.discard(p["text"])
+            for p in keep:
+                if p["text"] in seen:
+                    merged.append(dict(p, fragments=1))
+                    seen.discard(p["text"])
+            continue
+        q = dict(keep[0])
+        q["text"] = "".join(texts)
+        q["fragments"] = len(texts)
+        merged.append(q)
+    return merged, held
+
+
 def read_json(path, default=None):
     try:
         with io.open(path, encoding="utf-8") as f:
@@ -227,53 +341,74 @@ def build_plan(book_dir, min_hanzi):
     return book, blocks, plans, dropped, len(lost)
 
 
-def apply_plan(book_dir, book, blocks, plans, backup_suffix="丢文修复前"):
+def apply_plan(book_dir, book, blocks, plans, backup_suffix="丢文修复前", page_slack=1):
+    """B1 字数统一 count_chars；B4 合并同区域后一次落块；写回保持原换行/缩进（B7 同口径）。"""
     old_len = len(blocks)
-    old_chars = sum(len(b.get("text") or "") for b in blocks if b.get("type") == "paragraph")
-    add = sum(len(p["text"]) for p in plans)
-    new_blocks = [dict(b) for b in blocks]
-    # splice：纯插入
-    grouped = {}
-    for p in plans:
-        if p["op"] == "splice":
-            grouped.setdefault(p["idx"], []).append(p)
-    for idx, ops in grouped.items():
-        t = new_blocks[idx].get("text") or ""
-        for p in sorted(ops, key=lambda x: -x["a"]):
-            t = t[:p["a"]] + p["text"] + t[p["a"]:]
-        new_blocks[idx]["text"] = t
-    # append
-    for p in [x for x in plans if x["op"] == "append"]:
-        new_blocks[p["idx"]]["text"] = (new_blocks[p["idx"]].get("text") or "") + p["text"]
-    # prepend（按 y 倒序，保证同段多片段的先后顺序）
-    for p in sorted([x for x in plans if x["op"] == "prepend"],
-                    key=lambda x: (x["page"], x["col"], x["y"]), reverse=True):
-        new_blocks[p["idx"]]["text"] = p["text"] + (new_blocks[p["idx"]].get("text") or "")
-    # insert
-    ins = sorted([x for x in plans if x["op"] == "insert"],
-                 key=lambda x: (-(x["idx"] if x["idx"] is not None else old_len), x["page"], x["col"], x["y"]))
-    for p in ins:
-        t = p["idx"] if p["idx"] is not None else old_len
-        new_blocks.insert(t, {"type": "paragraph", "text": p["text"], "page": p["page"],
-                              "col": p["col"], "y": p["y"], "indent": False, "_repaired": True})
-    ins_pos = sorted([(p["idx"] if p["idx"] is not None else old_len) for p in ins])
+    old_chars = chars_of(blocks)
+    merged, held = merge_plans(plans, blocks, page_slack)
+    add = sum(len(p["text"]) for p in merged)
+
+    text_ops, by_pos = {}, {}
+    for p in merged:
+        if p["op"] == "insert":
+            by_pos.setdefault(p["idx"] if p["idx"] is not None else old_len, []).append(p)
+        else:
+            text_ops.setdefault(p["idx"], []).append(p)
+
+    new_blocks = []
+    for i, b in enumerate(blocks):
+        for p in sorted(by_pos.get(i, []), key=order_key):        # 插入落在该块之前
+            new_blocks.append({"type": "paragraph", "text": p["text"], "page": p["page"],
+                               "col": p["col"], "y": p["y"], "indent": False, "_repaired": True})
+        nb = dict(b)
+        ops = text_ops.get(i) or []
+        if ops:
+            t = b.get("text") or ""
+            kind = ops[0]["op"]
+            if kind == "append":
+                t = t + "".join(p["text"] for p in sorted(ops, key=order_key))
+            elif kind == "prepend":
+                t = "".join(p["text"] for p in sorted(ops, key=order_key)) + t
+            else:                                               # splice：位置是原串坐标，从后往前插
+                for p in sorted(ops, key=lambda x: -x.get("a", 0)):
+                    a = p.get("a", 0)
+                    t = t[:a] + p["text"] + t[a:]
+            nb["text"] = t
+        new_blocks.append(nb)
+    for pos in sorted(k for k in by_pos if k >= old_len):
+        for p in sorted(by_pos[pos], key=order_key):
+            new_blocks.append({"type": "paragraph", "text": p["text"], "page": p["page"],
+                               "col": p["col"], "y": p["y"], "indent": False, "_repaired": True})
+
+    ins_pos = []
+    for i, ps in by_pos.items():
+        ins_pos.extend([i] * len(ps))
+    ins_pos.sort()
     for c in book.get("chapters") or []:
         sb = c.get("startBlock")
         if isinstance(sb, int):
             c["startBlock"] = sb + sum(1 for t in ins_pos if t <= sb)
     book["blocks"] = new_blocks
     st = book.setdefault("stats", {})
-    new_chars = sum(len(b.get("text") or "") for b in new_blocks if b.get("type") == "paragraph")
+    new_chars = chars_of(new_blocks)
     if new_chars != old_chars + add:
-        raise SystemExit("字数不守恒：%d != %d + %d（拒绝写盘）" % (new_chars, old_chars, add))
+        raise SystemExit("字数不守恒（count_chars 口径）：%d != %d + %d（拒绝写盘）"
+                         % (new_chars, old_chars, add))
     st["chars"] = new_chars
     st["paragraphs"] = sum(1 for b in new_blocks if b.get("type") == "paragraph")
+    path = os.path.join(book_dir, "book.json")
+    fmt = detect_json_format(read_bytes(path))
     bak = os.path.join(book_dir, "book.json.bak_%s_%s" % (time.strftime("%Y%m%d_%H%M"), backup_suffix))
-    shutil.copy2(os.path.join(book_dir, "book.json"), bak)
-    with io.open(os.path.join(book_dir, "book.json"), "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(book, ensure_ascii=False, indent=2))
+    shutil.copy2(path, bak)
+    payload = dump_json_preserving(book, fmt)
+    with io.open(path, "w", encoding="utf-8", newline="") as f:
+        f.write(payload)
+    after = detect_json_format(read_bytes(path))
+    if (after["newline"], after["indent"], after["compact"]) != (fmt["newline"], fmt["indent"], fmt["compact"]):
+        raise SystemExit("写后自证失败：格式漂移 %r → %r" % (fmt, after))
     return {"blocks": (old_len, len(new_blocks)), "chars": (old_chars, new_chars),
-            "backup": os.path.basename(bak)}
+            "backup": os.path.basename(bak), "merged": len(merged), "held": held,
+            "format": fmt, "add": add}
 
 
 def main():
@@ -293,8 +428,12 @@ def main():
           % (dict(Counter(p["op"] for p in plans)), sum(hz(p["text"]) for p in plans)))
     for p in plans[:12]:
         print("   [%s] p%-4s c%s y=%-5s %s" % (p["op"], p["page"], p["col"], round(p["y"]), p["text"][:48]))
+    merged, held = merge_plans(plans, book.get("blocks") or [], 1)
+    print("  合并后计划 %d 条（原 %d 条）｜挂起 %d 组" % (len(merged), len(plans), len(held)))
+    for h in held[:8]:
+        print("   [挂起] idx=%s %s（%d 片段）" % (h.get("idx"), h.get("reason"), h.get("count") or 0))
     if not args.apply:
-        print("\n（dry-run：加 --apply 写回，会自动备份 book.json）")
+        print("\n（dry-run：未写盘。加 --apply 写回，会自动备份 book.json，并保持原换行/缩进）")
         return 0
     r = apply_plan(d, book, blocks, plans)
     print("\n已写回：blocks %d → %d | chars %d → %d（+%d）| 备份 %s"

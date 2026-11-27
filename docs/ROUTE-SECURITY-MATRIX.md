@@ -1,4 +1,4 @@
-# Route Security Matrix (public summary, 2026-11-26)
+# Route Security Matrix (public summary, 2026-11-27)
 
 Companion to [SECURITY.md](SECURITY.md). The authoritative internal matrix (37 routes, 12
 path-variant probes) is kept in private project docs; this file records the classification
@@ -19,4 +19,6 @@ Enforcement order: Host allow-list → anonymous method binding → open-mode pa
 authentication → CSRF → dispatch. Bypass classes verified negative: case tricks, single/double
 percent-encoding, extra slashes, dot segments, trailing dots/spaces, 8.3 names, NTFS alternate
 streams, symlinks (all 401/302/400 in session mode; static resolution unchanged in open mode).
-The suite `tools/test_server_security.js` (R1–R22, 164 assertions) locks every row above.
+The suite `tools/test_server_security.js` (**R1–R24, 171 assertions**) locks every row above;
+R23 asserts `/api/search` is 401-when-unauthenticated (API prefix never 302), R24 asserts the
+search query limits (≤96 chars / 6 terms / ≤200 hits) and snippet escaping (added v1.1.0).

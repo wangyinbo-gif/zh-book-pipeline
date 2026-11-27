@@ -5,6 +5,10 @@ import json
 import os
 import re
 import sys
+import shutil
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 CAP = re.compile(r"图\s?\d+\s?[-—~－.．·一]\s?\d+")
 CAP2 = re.compile(r"^图\s?\d{1,4}(?![0-9])")
@@ -19,29 +23,99 @@ GJ = re.compile(r"(?P<pre>[左右]\s*[^。；，！？]{0,18}?(?:初刻本|原�
 
 
 def load_pages(book_dir):
-    """OCR 行缓存：不同批次的命名有 _ocr2/_ocr/_text 三种，统一都读。"""
-    files = sorted(glob.glob(os.path.join(book_dir, "pages", "page_*.json")))
-    pages = {}
-    for f in files:
-        base = os.path.basename(f)
-        if not ("_text" in base or "_ocr" in base):
+    """B5：每页固定一套有效缓存，且与 gate/textcheck 同源。
+
+    旧版 glob 把 page_*_text/_ocr/_ocr2.json 混进同一个 dict（后读的覆盖先读的），
+    实测同一页 _ocr2 与 _ocr 行数可差 3 倍（30 vs 93），补出来的图注与质检口径不同源。
+    现在一律走 pipeline.load_ocr_pages：优先 _ocr2，缺缓存才降级 _ocr，_text 不参与。
+    返回 (pages, kinds)：kinds[页] = "ocr2"|"ocr"，供输出标注降级页。
+    """
+    try:
+        import pipeline as pl
+        raw = pl.load_ocr_pages(book_dir)
+    except Exception as ex:
+        print("  ! pipeline.load_ocr_pages 不可用（%s），退回本文件内同口径读取" % ex)
+        raw = _load_ocr_pages_local(book_dir)
+    pages, kinds = {}, {}
+    for pg, (variant, ls) in raw.items():
+        pages[pg] = [l for l in ls if (l.get("text") or "").strip()]
+        kinds[pg] = variant
+    return pages, kinds
+
+
+def _load_ocr_pages_local(book_dir):
+    """与 pipeline.load_ocr_pages 同规则的兜底（优先 ocr2，同页只留一套，不读 _text）。"""
+    out = {}
+    d = os.path.join(book_dir, "pages")
+    if not os.path.isdir(d):
+        return out
+    for name in sorted(os.listdir(d)):
+        m = re.fullmatch(r"page_(\d+)_(ocr2?)\.json", name)
+        if not m:
             continue
-        m = re.search(r"page_(\d+)_", base)
-        if m:
-            try:
-                pages[int(m.group(1))] = json.load(open(f, encoding="utf-8"))
-            except Exception:
-                pass
-    return pages
+        pg, variant = int(m.group(1)), m.group(2)
+        if pg in out and out[pg][0] == "ocr2":
+            continue
+        try:
+            arr = json.load(open(os.path.join(d, name), encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(arr, list):
+            out[pg] = (variant, [l if isinstance(l, dict) else {"text": str(l)}
+                                 for l in arr if l is not None])
+    return out
+
+
+def read_bytes(path):
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def detect_json_format(raw):
+    """按字节探测换行与缩进（写回复用，不顺手统一格式）。"""
+    crlf = raw.count(b"\r\n")
+    lf = raw.count(b"\n") - crlf
+    newline = "\r\n" if crlf > lf else "\n"
+    ls = raw.decode("utf-8-sig", "replace").split("\n")
+    indent, compact = None, len([x for x in ls if x.strip()]) <= 1
+    if not compact:
+        for line in ls[1:8]:
+            m = re.match(r"^([ \t]+)\S", line)
+            if m:
+                indent = "\t" if m.group(1)[0] == "\t" else len(m.group(1))
+                break
+        if indent is None:
+            indent = 2
+    return {"newline": newline, "indent": indent, "crlf": crlf, "lf": lf, "compact": compact}
+
+
+def dump_json_preserving(obj, fmt):
+    ind = fmt.get("indent")
+    out = json.dumps(obj, ensure_ascii=False) if (fmt.get("compact") or ind is None) else json.dumps(obj, ensure_ascii=False, indent=ind)
+    nl = fmt.get("newline", "\n")
+    return out if nl == "\n" else out.replace("\n", nl)
 
 
 def main():
-    book_dir = sys.argv[1]
+    argv = sys.argv[1:]
+    apply = ("--apply" in argv)
+    pos = [a for a in argv if not a.startswith("--")]
+    if not pos:
+        print("用法: python tools/fix_unpaired_captions.py <书目录> [--apply]　（默认只预演，不写盘）")
+        return 2
+    book_dir = pos[0]
     path = os.path.join(book_dir, "book.json")
-    book = json.load(open(path, encoding="utf-8"))
-    pages = load_pages(book_dir)
+    raw_before = read_bytes(path)
+    fmt = detect_json_format(raw_before)
+    book = json.loads(raw_before.decode("utf-8-sig"))
+    pages, kinds = load_pages(book_dir)
+    degraded = sorted(pg for pg, k in kinds.items() if k != "ocr2")
+    print("缓存口径：每页一套（优先 _ocr2）｜有缓存页 %d ｜降级 _ocr 页 %d %s"
+          % (len(pages), len(degraded), ("如 " + ",".join(str(x) for x in degraded[:8])) if degraded else ""))
     blocks = book["blocks"]
     figs = [b for b in blocks if b["type"] == "figure"]
+    cap_before = {id(f): (f.get("caption") or "") for f in figs}
+    orig_before = {id(f): (f.get("originalCaption") or "") for f in figs}
     paras_by_page = {}
     for b in blocks:
         if b["type"] == "paragraph":
@@ -222,9 +296,28 @@ def main():
                 used.add(key)
             fixed += 1
 
-    json.dump(book, open(path, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
     missing = [f for f in figs if not (f.get("caption") or "").strip()]
     print("补图注:", fixed, "| 仍缺:", len(missing), "| 图:", len(figs))
+    changed = [(f.get("page"), f.get("id"), orig_before.get(id(f), ""), (f.get("caption") or ""))
+               for f in figs if (f.get("caption") or "") != cap_before.get(id(f), "")]
+    if changed:
+        print("  计划改动 %d 条（前 12 条：页 / 图 id / 原 / 新）：" % len(changed))
+        for pg, fid, orig, cap in changed[:12]:
+            print("   p%-4s %-12s %r → %r" % (pg, str(fid)[:12], orig[:22], cap[:30]))
+    if not apply:
+        print("\n（dry-run：未写盘。确认无误后加 --apply 才会改 book.json；写回保持原换行/缩进并自动备份）")
+        return 0
+    bak = os.path.join(book_dir, "book.json.bak_%s_图注补全前" % time.strftime("%Y%m%d_%H%M"))
+    shutil.copy2(path, bak)
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(dump_json_preserving(book, fmt))
+    after = detect_json_format(read_bytes(path))
+    if (after["newline"], after["indent"], after["compact"]) != (fmt["newline"], fmt["indent"], fmt["compact"]):
+        print("  ! 写后自证失败：格式漂移 %r → %r" % (fmt, after))
+        return 1
+    print("已写回（备份 %s ｜ 格式保持 %s indent=%s）"
+          % (os.path.basename(bak), "CRLF" if fmt["newline"] == "\r\n" else "LF", fmt["indent"]))
+    return 0
 
 
 if __name__ == "__main__":
